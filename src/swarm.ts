@@ -98,12 +98,17 @@ export class Swarm {
                     success: commandRequested,
                     data: commandInfo
                 } = agentInvocationSchema.safeParse(toolCallReturnValue)
+
                 if (commandRequested ) {
                     const agentToTransferTo = this.agents.find(agent => agent.uuid === commandInfo.uuid)
                     if (!agentToTransferTo) {
                         // NOTE THIS SHOULD NEVER HAPPEN
                         logger.error(`Requested to transfer to agent ${commandInfo.uuid} but no such agent was found:`, this.agents)
                     }
+                    // TODO transfer control to the agent
+                }
+                else {
+                    // TODO THIS IS A VALID TOOL CALL and we need to add things to context,
                 }
             }
 
