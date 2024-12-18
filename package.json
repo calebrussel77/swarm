@@ -1,5 +1,6 @@
 {
   "name": "swarm",
+  "version": "0.0.1",
   "description": "LLM-agnostic typescript framework for creating OpenAI-style Swarm agents with the Vercel AI SDK",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -11,7 +12,8 @@
     "require": "./dist/index.cjs"
   },
   "scripts": {
-    "build": "bun run build.ts"
+    "build": "bun run build.ts",
+    "test": "bun test"
   },
   "files": [
     "dist"
@@ -36,14 +38,21 @@
   "author": "Kyle Mistele <kyle@constellate.ai",
   "devDependencies": {
     "@types/bun": "latest",
-    "bun-plugin-dts": "^0.3.0",
-    "bun": "^1.1.40"
-
+    "@types/nunjucks": "^3.2.6",
+    "bun": "^1.1.40",
+    "bun-plugin-dts": "^0.3.0"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
   },
   "dependencies": {
-    "ai": "^4.0.20"
+    "@ai-sdk/openai": "^1.0.9",
+    "ai": "^4.0.20",
+    "dotenv": "^16.4.7",
+    "json-colorizer": "^3.0.1",
+    "nunjucks": "^3.2.4",
+    "util": "^0.12.5",
+    "winston": "^3.17.0",
+    "zod": "^3.24.1"
   }
 }
