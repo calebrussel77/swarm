@@ -1,23 +1,33 @@
-import {type AgentOptions, agentOptionsSchema} from './schemas/agent.schemas.ts'
+import {
+    type AgentInvocation,
+    type AgentOptions,
+    agentOptionsSchema,
+    type ParsedAgentOptions
+} from './schemas/agent.schemas'
 import {type CoreTool, type JSONValue, tool} from 'ai'
 import nunjucks from 'nunjucks'
 import z from 'zod'
-import {createLogger} from './logger.ts'
+import {createLogger} from './logger'
+import {randomUUID} from 'node:crypto'
 
 const logger = createLogger(__filename)
 
 export class Agent {
 
-    private config: Omit<AgentOptions, 'name' | 'description'>
+    public config: Omit<ParsedAgentOptions, 'name' | 'description' | 'tools'>
     public name: string
     public description: string
+    public tools: Record<string, CoreTool>
+    public readonly uuid: string
 
-    constructor(options: AgentOptions) {
+    constructor(options: AgentOptions,) {
 
-        const {name, description, ...config } = agentOptionsSchema.parse(options)
+        const {name, description, tools, ...config } = agentOptionsSchema.parse(options)
         this.config = config
         this.name = name
         this.description = description
+        this.tools = tools
+        this.uuid = randomUUID()
     }
 
     /**
@@ -36,12 +46,16 @@ export class Agent {
      * @param toolDescription - the description for the tool to dispatch this agent. E.g. it may describe when to call
      * this tool to dispatch the agent
      */
-    public dispatchTool(toolDescription?: string) {
+    public dispatchable(toolDescription?: string) {
         return tool({
             description: toolDescription || `Dispatch agent "${this.name}". About this agent: ${this.description}`,
             parameters: z.object({}),
             execute: async ({}) => {
                 logger.info(`Trying to dispatch agent ${this.name}`)
+                return {
+                    command: 'transfer_to_agent',
+                    uuid: this.uuid
+                } satisfies AgentInvocation
             }
         })
     }

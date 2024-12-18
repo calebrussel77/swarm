@@ -1,9 +1,9 @@
 import z from 'zod'
 import type {CoreMessage, LanguageModelV1} from 'ai'
 import {openai} from '@ai-sdk/openai'
-import {Agent} from '../agent.ts'
-import {jsonValueSchema} from './common.schemas.ts'
-import type {SwarmMessage} from '../types.ts'
+import {Agent} from '../agent'
+import {jsonValueSchema} from './common.schemas'
+import type {SwarmMessage} from '../types'
 
 export const swarmOptionsSchema = z.object({
     defaultLanguageModel: z.custom<LanguageModelV1>()
@@ -20,8 +20,12 @@ export const swarmOptionsSchema = z.object({
     name: z.string()
         .optional()
         .describe('A name for the swarm'),
+    agents: z.array(z.custom<Agent>((data) => data instanceof Agent))
+        .describe('Exhaustive list of agents that may be routed to in the swarm')
 })
-export type SwarmOptions = z.infer<typeof swarmOptionsSchema>
+
+export type SwarmOptions = z.input<typeof swarmOptionsSchema>
+export type ParsedSwarmOptions = z.infer<typeof swarmOptionsSchema>
 
 export const swarmInvocationOptionsSchema = z.object({
     updateLeader: z.custom<Agent>((agent) => agent instanceof Agent, 'Swarm leader must be an agent!')
@@ -37,7 +41,9 @@ export const swarmInvocationOptionsSchema = z.object({
         .describe('The messages & instructions to run the swarm against'),
     maxTurns: z.number()
         .default(100)
-        .describe('The maximum number of invocations allowed before sending an unprocessed response')
+        .describe('The maximum number of invocations allowed before sending an unprocessed response'),
+
 })
 
-export type SwarmInvocationOptions = z.infer<typeof swarmInvocationOptionsSchema>
+export type SwarmInvocationOptions = z.input<typeof swarmInvocationOptionsSchema>
+export type ParsedSwarmInvocationOptions = z.infer<typeof swarmInvocationOptionsSchema>

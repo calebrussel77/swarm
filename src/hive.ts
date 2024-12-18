@@ -1,13 +1,13 @@
 import type {JSONValue, LanguageModel, LanguageModelV1} from 'ai'
-import type {Agent} from './agent.ts'
+import type {Agent} from './agent'
 import {
     type HiveCreateSwarmOptions,
     hiveCreateSwarmOptionsSchema,
     type HiveOptions,
     hiveOptionsSchema
-} from './schemas/hive.schemas.ts'
-import {Swarm} from './swarm.ts'
-import type {SwarmMessage} from './types.ts'
+} from './schemas/hive.schemas'
+import {Swarm} from './swarm'
+import type {SwarmMessage} from './types'
 
 /**
  * A **Hive** represents something like a "Swarm Factory". It looks like a static configuration, from which new
@@ -16,8 +16,9 @@ import type {SwarmMessage} from './types.ts'
 export class Hive {
 
     private readonly defaultLanguageModel: LanguageModelV1
-    private readonly queen: Agent
+    public readonly queen: Agent
     private readonly defaultContext: Record<string, JSONValue>
+    public agents: Array<Agent>
 
     constructor(options: HiveOptions) {
 
@@ -25,6 +26,7 @@ export class Hive {
         this.defaultLanguageModel = hiveOptions.defaultLanguageModel
         this.queen = hiveOptions.queen
         this.defaultContext = hiveOptions.defaultContext
+        this.agents = hiveOptions.agents
     }
 
     /**
@@ -41,7 +43,8 @@ export class Hive {
             initialContext: {
                 ...this.defaultContext,
                 ...swarmCreationOptions.updatedContext
-            }
+            },
+            agents: swarmCreationOptions.agents ?? this.agents
         })
     }
 }

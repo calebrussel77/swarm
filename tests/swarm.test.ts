@@ -1,7 +1,7 @@
 import {describe, expect, test} from 'bun:test'
 import {Swarm} from '../src'
 import {openai} from '@ai-sdk/openai'
-import {Agent} from '../src/agent.ts'
+import {Agent} from '../src/agent'
 
 
 describe('Swarm Initialization tests', () => {
@@ -23,7 +23,8 @@ describe('Swarm Initialization tests', () => {
             swarm = new Swarm({
                 defaultLanguageModel: openai('gpt-4o-mini'),
                 name: 'Test Swarm',
-                leader: agent
+                leader: agent,
+                agents: [agent]
             })
         }).not.toThrowError()
     })

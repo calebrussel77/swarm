@@ -1,1 +1,1 @@
-export * from './swarm.ts'
+export * from './swarm'

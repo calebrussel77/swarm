@@ -1,11 +1,10 @@
 import z from 'zod'
 import type {
-    CoreMessage,
     CoreTool,
     LanguageModelV1
 } from 'ai'
-import {jsonValueSchema} from './common.schemas.ts'
-import Agent from '../agent.ts'
+import {jsonValueSchema} from './common.schemas'
+
 
 export const agentOptionsSchema = z.object({
     name: z.string()
@@ -24,7 +23,8 @@ export const agentOptionsSchema = z.object({
     ])
         .describe('The system prompt string, nunjucks template string, or function that returns the system prompt from context'),
     tools: z.record(z.string(), z.custom<CoreTool>())
-        .default({})
+        .optional()
+        .transform(val => val ?? {} satisfies Record<string, CoreTool>)
         .describe('Tools that can be invoked by the agent.'),
     toolChoice: z.union([
         z.enum(['auto', 'none', 'required']),
@@ -61,4 +61,12 @@ export const agentOptionsSchema = z.object({
     ), {
         message: 'Tool choice may not be specified when there are no tools.'
     })
-export type AgentOptions = z.infer<typeof agentOptionsSchema>
+export type AgentOptions = z.input<typeof agentOptionsSchema>
+export type ParsedAgentOptions = z.infer<typeof agentOptionsSchema>
+
+export const agentInvocationSchema = z.object({
+    command: z.literal('transfer_to_agent'),
+    uuid: z.string().length(36)
+})
+
+export type AgentInvocation = z.infer<typeof agentInvocationSchema>

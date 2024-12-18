@@ -1,9 +1,9 @@
 import z from 'zod'
 import type {CoreMessage, LanguageModelV1} from 'ai'
 import {openai} from '@ai-sdk/openai'
-import {Agent} from '../agent.ts'
-import {jsonValueSchema} from './common.schemas.ts'
-import type {SwarmMessage} from '../types.ts'
+import {Agent} from '../agent'
+import {jsonValueSchema} from './common.schemas'
+import type {SwarmMessage} from '../types'
 
 export const hiveOptionsSchema = z.object({
     defaultLanguageModel: z.custom<LanguageModelV1>()
@@ -14,9 +14,12 @@ export const hiveOptionsSchema = z.object({
     defaultContext: z.record(z.string(), jsonValueSchema)
         .default({})
         .describe('Context variables for the swarm'),
+    agents: z.array(z.custom<Agent>((data) => data instanceof Agent))
+        .describe('Exhaustive list of agents that may be routed to in the swarm')
 })
 
-export type HiveOptions = z.infer<typeof hiveOptionsSchema>
+export type HiveOptions = z.input<typeof hiveOptionsSchema>
+export type ParsedHiveOptions = z.infer<typeof hiveOptionsSchema>
 
 export const hiveCreateSwarmOptionsSchema = z.object({
     defaultLanguageModel: z.custom<LanguageModelV1>()
@@ -31,6 +34,9 @@ export const hiveCreateSwarmOptionsSchema = z.object({
     updatedContext: z.record(z.string(), jsonValueSchema)
         .default({})
         .describe('Context variables for the swarm'),
+    agents: z.array(z.custom<Agent>((data) => data instanceof Agent))
+        .optional()
+        .describe('Exhaustive list of agents that may be routed to in the swarm')
 })
 
-export type HiveCreateSwarmOptions = z.infer<typeof hiveCreateSwarmOptionsSchema>
+export type HiveCreateSwarmOptions = z.input<typeof hiveCreateSwarmOptionsSchema>
