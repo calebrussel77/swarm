@@ -1,64 +1,113 @@
-import {
-    type AgentInvocation,
-    type AgentOptions,
-    agentOptionsSchema,
-    type ParsedAgentOptions
-} from './schemas/agent.schemas'
-import {type CoreTool, type JSONValue, tool} from 'ai'
+import {type CoreTool, type CoreToolChoice, type LanguageModel, type LanguageModelV1, tool} from 'ai'
 import nunjucks from 'nunjucks'
 import z from 'zod'
 import {createLogger} from './logger'
 import {randomUUID} from 'node:crypto'
+import {type JSONSerializableObject, jsonValueSchema} from './schemas/common.schemas'
 
 const logger = createLogger(__filename)
 
-export class Agent {
+/**
+ * Pulled from vercel AI SDK; useful type defs
+ */
 
-    public config: Omit<ParsedAgentOptions, 'name' | 'description' | 'tools'>
+/**
+ * Type for an agent FUNCTION tool, distinct from a HANDOVER tools
+ */
+export type AgentFunctionTool<
+    SWARM_CONTEXT extends JSONSerializableObject,
+    TOOL_PARAMETERS extends z.ZodType<any>,
+    FUNCTION_RESULT = any
+> = {
+    type?: 'function' | undefined,
+    description?: string
+    parameters: TOOL_PARAMETERS,
+    execute: (
+        args: z.infer<TOOL_PARAMETERS>,
+        options: {
+            abortSignal?: AbortSignal,
+            context: SWARM_CONTEXT
+        },
+    ) => Promise<FUNCTION_RESULT>
+}
+
+/**
+ * Type for an agent HANDOVER tool -- the handover tool to trigger an agent; and optionally update the context
+ * IF the handover tool has parameters
+ */
+export type AgentHandoverTool<
+    SWARM_CONTEXT extends JSONSerializableObject,
+    TOOL_PARAMETERS extends z.ZodType<any>
+> = {
+    type: 'handover',
+    description?: string,
+    parameters: TOOL_PARAMETERS,
+    execute: (
+        args: z.infer<TOOL_PARAMETERS>,
+        options: {
+            abortSignal?: AbortSignal,
+            context: SWARM_CONTEXT
+        }
+    ) => ({
+        agent: Agent<SWARM_CONTEXT>,
+        context: SWARM_CONTEXT
+    })
+
+}
+
+export type AgentTool<SWARM_CONTEXT extends JSONSerializableObject> =
+    AgentFunctionTool<SWARM_CONTEXT, any, any> |
+    AgentHandoverTool<SWARM_CONTEXT, any>
+
+
+/**
+ * Agent options
+ */
+export type AgentOptions<SWARM_CONTEXT extends JSONSerializableObject> = {
+    name: string
+    description: string
+    languageMode?: LanguageModel
+    instructions: string | ((c: SWARM_CONTEXT) => string)
+    tools?: Record<string, AgentTool<SWARM_CONTEXT>>
+    toolChoice?: CoreToolChoice<any>
+    maxTokens?: number
+    temperature?: number
+    maxTurns?: number
+}
+
+
+/**
+ * The agent class; sensitive to the shape of the swarm's context
+ */
+export class Agent<SWARM_CONTEXT extends JSONSerializableObject> {
+
+    public config: Omit<AgentOptions<SWARM_CONTEXT>, 'name' | 'description' | 'tools'>
     public name: string
     public description: string
-    public tools: Record<string, CoreTool>
+    public tools?: Record<string, AgentTool<SWARM_CONTEXT>>
     public readonly uuid: string
 
-    constructor(options: AgentOptions,) {
+    constructor(options: AgentOptions<SWARM_CONTEXT>) {
 
-        const {name, description, tools, ...config } = agentOptionsSchema.parse(options)
+        const {name, description, tools, ...config} = options
         this.config = config
         this.name = name
         this.description = description
         this.tools = tools
-        this.uuid = randomUUID()
+        this.uuid = randomUUID() // agent needs a random UUID
     }
 
     /**
      * Render the agent's instructions
      * @param context
      */
-    public getInstructions(context: Record<string, JSONValue>): string {
+    public getInstructions(context: SWARM_CONTEXT): string {
         if (typeof this.config.instructions === 'string') {
             return nunjucks.renderString(this.config.instructions, context)
         }
         else return this.config.instructions(context)
     }
 
-    /**
-     * Convert the agent to a tool so that it can be dispatched by another agent
-     * @param toolDescription - the description for the tool to dispatch this agent. E.g. it may describe when to call
-     * this tool to dispatch the agent
-     */
-    public dispatchable(toolDescription?: string) {
-        return tool({
-            description: toolDescription || `Dispatch agent "${this.name}". About this agent: ${this.description}`,
-            parameters: z.object({}),
-            execute: async ({}) => {
-                logger.info(`Trying to dispatch agent ${this.name}`)
-                return {
-                    command: 'transfer_to_agent',
-                    uuid: this.uuid
-                } satisfies AgentInvocation
-            }
-        })
-    }
 }
 
 export default Agent

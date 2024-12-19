@@ -33,18 +33,18 @@ describe('Agent text generation', async () => {
             description: 'A simple agent that answers user queries',
             instructions: 'You help users talk to the person that they want to talk to by routing them appropriately.',
             tools: {
-                get_current_weather: tool({
+                get_current_weather: {
+                    type: 'function',
                     description: 'Get the weather in a given city',
                     parameters: z.object({
                         city: z.string().describe('The city to get the weather for.'),
                         swarmContext: z.record(z.string(), jsonValueSchema)
                     }),
-                    execute: async ({city, swarmContext}) => {
+                    execute: async ({city, swarmContext}, options) => {
                         console.log(`Got weather for city ${city} with context`, swarmContext)
                         return "70 degrees fahrenheit and sunny"
                     }
-                }),
-                transfer_to_sales: salesAgent.dispatchable('Transfer the person to sales so they can get the help they need')
+                },
             }
 
         })

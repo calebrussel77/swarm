@@ -9,3 +9,5 @@ export const jsonValueSchema: z.ZodType<JSONValue> = z.lazy(() => z.union([
     z.record(jsonValueSchema),
     z.array(jsonValueSchema)
 ]))
+
+export type JSONSerializableObject = {[key: string]: JSONValue}
