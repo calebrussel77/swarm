@@ -2,8 +2,8 @@ import z from 'zod'
 import type {CoreMessage, LanguageModelV1} from 'ai'
 import {openai} from '@ai-sdk/openai'
 import {Agent} from '../agent'
-import {jsonValueSchema} from './common.schemas'
 import type {SwarmMessage} from '../types'
+import {jsonValueSchema} from '../utils'
 
 export const hiveOptionsSchema = z.object({
     defaultLanguageModel: z.custom<LanguageModelV1>()

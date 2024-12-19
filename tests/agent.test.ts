@@ -4,7 +4,8 @@ import {Swarm} from '../src'
 import {openai} from '@ai-sdk/openai'
 import {tool} from 'ai'
 import z from 'zod'
-import {jsonValueSchema} from '../src/schemas/common.schemas'
+
+import {jsonValueSchema} from '../src/utils'
 
 describe('Agent Initialization tests', () => {
 
@@ -48,15 +49,15 @@ describe('Agent text generation', async () => {
             }
 
         })
-        const swarm = new Swarm({
+        const swarm = new Swarm<{}>({
             name: 'Example swarm',
-            leader: routerAgent,
-            defaultLanguageModel: openai('gpt-4o-mini'),
-            agents: [routerAgent, salesAgent]
+            queen: routerAgent,
+            defaultModel: openai('gpt-4o-mini'),
+            initialContext: {}
         })
 
         const result = await swarm.generateText({
-            userMessage: 'Can I talk to sales?'
+            content: 'Can I talk to sales?'
         })
 
     })

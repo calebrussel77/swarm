@@ -3,7 +3,8 @@ import nunjucks from 'nunjucks'
 import z from 'zod'
 import {createLogger} from './logger'
 import {randomUUID} from 'node:crypto'
-import {type JSONSerializableObject, jsonValueSchema} from './schemas/common.schemas'
+
+import {type JSONSerializableObject, jsonValueSchema} from './utils'
 
 const logger = createLogger(__filename)
 
@@ -23,10 +24,9 @@ export type AgentFunctionTool<
     description?: string
     parameters: TOOL_PARAMETERS,
     execute: (
-        args: z.infer<TOOL_PARAMETERS>,
+        args: z.infer<TOOL_PARAMETERS> & SWARM_CONTEXT,
         options: {
             abortSignal?: AbortSignal,
-            context: SWARM_CONTEXT
         },
     ) => Promise<FUNCTION_RESULT>
 }
@@ -43,15 +43,14 @@ export type AgentHandoverTool<
     description?: string,
     parameters: TOOL_PARAMETERS,
     execute: (
-        args: z.infer<TOOL_PARAMETERS>,
+        args: z.infer<TOOL_PARAMETERS> & SWARM_CONTEXT,
         options: {
             abortSignal?: AbortSignal,
-            context: SWARM_CONTEXT
         }
-    ) => ({
+    ) => Promise<{
         agent: Agent<SWARM_CONTEXT>,
         context: SWARM_CONTEXT
-    })
+    }>
 
 }
 
@@ -63,10 +62,10 @@ export type AgentTool<SWARM_CONTEXT extends JSONSerializableObject> =
 /**
  * Agent options
  */
-export type AgentOptions<SWARM_CONTEXT extends JSONSerializableObject> = {
+export type AgentOptions<SWARM_CONTEXT extends JSONSerializableObject = JSONSerializableObject> = {
     name: string
     description: string
-    languageMode?: LanguageModel
+    model?: LanguageModel
     instructions: string | ((c: SWARM_CONTEXT) => string)
     tools?: Record<string, AgentTool<SWARM_CONTEXT>>
     toolChoice?: CoreToolChoice<any>
@@ -79,12 +78,12 @@ export type AgentOptions<SWARM_CONTEXT extends JSONSerializableObject> = {
 /**
  * The agent class; sensitive to the shape of the swarm's context
  */
-export class Agent<SWARM_CONTEXT extends JSONSerializableObject> {
+export class Agent<SWARM_CONTEXT extends JSONSerializableObject = JSONSerializableObject> {
 
     public config: Omit<AgentOptions<SWARM_CONTEXT>, 'name' | 'description' | 'tools'>
     public name: string
     public description: string
-    public tools?: Record<string, AgentTool<SWARM_CONTEXT>>
+    public tools: Record<string, AgentTool<SWARM_CONTEXT>> | undefined
     public readonly uuid: string
 
     constructor(options: AgentOptions<SWARM_CONTEXT>) {

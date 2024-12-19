@@ -1,122 +1,116 @@
 import z from 'zod'
-import {
-    type CoreTool,
-    type JSONValue,
-    type LanguageModelV1,
-    type ToolExecutionOptions,
-    tool,
-    generateText
+import type {
+    CoreTool,
+    JSONValue,
+    LanguageModel,
+    ToolExecutionOptions,
+    CoreAssistantMessage,
+    CoreSystemMessage,
+    CoreUserMessage,
+    CoreToolMessage, CoreMessage, UserContent, GenerateTextResult
 } from 'ai'
-import {
-    type SwarmInvocationOptions,
-    swarmInvocationOptionsSchema,
-    type SwarmOptions,
-    swarmOptionsSchema
-} from './schemas/swarm.schemas'
-import type {Agent} from './agent'
-import type {SwarmMessage} from './types'
+import {tool, generateText} from 'ai'
+import {Agent, type AgentTool} from './agent'
 import {createLogger} from './logger'
-import {agentInvocationSchema} from './schemas/agent.schemas'
+import type {JSONSerializableObject} from './utils'
 
 const logger = createLogger(__filename)
 
 const SWARM_CONTEXT_PROPERTY_NAME = 'swarmContext'
 
+export type SwarmMessage = (CoreAssistantMessage & { sender?: string }) |
+    CoreUserMessage |
+    CoreToolMessage |
+    CoreSystemMessage
+
+export type SwarmOptions<SWARM_CONTEXT extends JSONSerializableObject> = {
+    defaultModel: LanguageModel
+    queen: Agent<SWARM_CONTEXT>
+    initialContext: SWARM_CONTEXT
+    messages?: Array<SwarmMessage>
+    name?: string
+    maxTurns?: number
+    returnToQueen?: boolean // should control of the swarm be returned to the queen post-completion?
+}
+
+/**
+ * Invoke the swarm to handle a user message
+ */
+export type SwarmInvocationOptions<SWARM_CONTEXT extends JSONSerializableObject> = {
+    content: UserContent,
+    contextUpdate?: Partial<SWARM_CONTEXT>
+    setAgent?: Agent<SWARM_CONTEXT>
+    maxTurns?: number
+    returnToQueen?: boolean // should control of the swarm be returned to the queen post-completion?
+}
+
+
 /**
  * The swarm is the callable that can generate text, generate objects, or stream text.
  */
-export class Swarm {
+export class Swarm<SWARM_CONTEXT extends JSONSerializableObject = JSONSerializableObject> {
 
-    private readonly defaultLanguageModel: LanguageModelV1
-    private activeAgent: Agent
+    readonly defaultModeL: LanguageModel
+    readonly name?: string
+    private context: SWARM_CONTEXT
     private messages: Array<SwarmMessage>
-    private context: Record<string, JSONValue>
-    private readonly name?: string
-    private agents: Array<Agent>
+    private queen: Agent<SWARM_CONTEXT>
+    private activeAgent: Agent<SWARM_CONTEXT>
+    private readonly maxTurns?: number
+    private returnToQueen: boolean
 
-    constructor(options: SwarmOptions) {
-
-        const swarmOptions = swarmOptionsSchema.parse(options)
-
-        this.defaultLanguageModel = swarmOptions.defaultLanguageModel
-        this.activeAgent = swarmOptions.leader
-        this.messages = swarmOptions.messages
-        this.context = swarmOptions.initialContext
-        this.name = swarmOptions.name
-        this.agents = swarmOptions.agents
-
-        logger.info(`Initiated swam ${swarmOptions.name}`)
+    constructor(options: SwarmOptions<SWARM_CONTEXT>) {
+        this.context = options.initialContext || {}
+        this.defaultModeL = options.defaultModel
+        this.queen = options.queen
+        this.activeAgent = options.queen
+        this.messages = options.messages || []
+        this.name = options.name
+        this.maxTurns = options.maxTurns
+        this.returnToQueen = !!options.returnToQueen
     }
 
     /**
      * Use the swarm to generate text / tool calls
      */
-    public async generateText(options: SwarmInvocationOptions) {
+    public async generateText(options: SwarmInvocationOptions<SWARM_CONTEXT>) {
 
-        const invocation = swarmInvocationOptionsSchema.parse(options)
-        logger.info(`Triggered swarm for user input: "${options.userMessage}"`)
-
+        logger.info(`Triggered swarm for user input: "${options.content}"`)
         // handle any swarm updates & overrides based on the user input
         this.handleUpdatesAndOverrides(options)
 
-        for (let i = 0; i < invocation.maxTurns; i++) {
-            // We need to re-build instructions evert time since context may change!
-            const agentInstructions = this.activeAgent.getInstructions(this.context)
-            // Add the agent's system prompt to the front of the messages
-            const messages: Array<SwarmMessage> = [
-                {role: 'system', content: agentInstructions},
-                {role: 'user', content: invocation.userMessage},
-                ...this.messages
-            ]
-            logger.debug(`Creating chat completion for conversation:`, messages)
+        const maxTurns = options.maxTurns || this.maxTurns
+        const messages: Array<CoreMessage> = [
+            {role: 'system', content: this.activeAgent.getInstructions(this.context)},
+            ...this.messages,
+            {role: 'user', content: options.content}
+        ]
+        const tools = this.wrapTools(this.activeAgent.tools)
 
-            // Wrap tools so the LLM can't see the magic `swarmContext` tool parameters
-            const toolsForModel = this.wrapAgentToolsToHideContext(this.activeAgent.tools)
+        // Can generate prompt instead too
+        let lastResult: GenerateTextResult<any, any>
+        const responseMessages: Array<CoreMessage> = []
 
-            // Do execution
-            const result = await generateText({
-                model: this.activeAgent.config.languageModel || this.defaultLanguageModel,
-                messages: messages,
-                tools: toolsForModel,
-                // @ts-expect-error - we are doing zod validation so this should be fine
-                toolChoice: this.activeAgent.config.toolChoice,
-                maxTokens: this.activeAgent.config.maxTokens,
-                temperature: this.activeAgent.config.temperature
-            })
-            const {text, toolResults, toolCalls, response, steps } = result
-            logger.debug(`text:`, text)
-            logger.debug(`toolResults: `, toolResults)
-            logger.debug(`tool calls`, toolCalls)
-            logger.debug(`response.messages:`, response.messages)
-            //logger.debug(`steps:`, steps)
+        // TODO reset the current agent to the queen, if requested.
+    }
 
-            // Check if should transfer
-            for (const result of toolResults) {
-                // @ts-expect-error - it works!
-                const toolCallReturnValue = result.result
-                const {
-                    success: commandRequested,
-                    data: commandInfo
-                } = agentInvocationSchema.safeParse(toolCallReturnValue)
+    /**
+     * Return a read-only version of the context
+     */
+    public getContext() {
+        return this.context as Readonly<SWARM_CONTEXT>
+    }
 
-                if (commandRequested ) {
-                    const agentToTransferTo = this.agents.find(agent => agent.uuid === commandInfo.uuid)
-                    if (!agentToTransferTo) {
-                        // NOTE THIS SHOULD NEVER HAPPEN
-                        logger.error(`Requested to transfer to agent ${commandInfo.uuid} but no such agent was found:`, this.agents)
-                    }
-                    // TODO transfer control to the agent
-                }
-                else {
-                    // TODO THIS IS A VALID TOOL CALL and we need to add things to context,
-                }
-            }
-
-            // NOTE TODO REMOVE THIS
-            break;
-
+    /**
+     * Update context, and receive a readonly version of it.
+     * @param update
+     */
+    public updateContext(update: Partial<SWARM_CONTEXT>) {
+        this.context = {
+            ...this.context,
+            ...update
         }
-
+        return this.context as Readonly<SWARM_CONTEXT>
     }
 
     /**
@@ -124,22 +118,19 @@ export class Swarm {
      * @param invocationOptions
      * @private
      */
-    private handleUpdatesAndOverrides(invocationOptions: SwarmInvocationOptions) {
-        if (invocationOptions.updateLeader) {
-            this.activeAgent = invocationOptions.updateLeader
-            logger.warn(`Overriding swarm ${this.name ? "'" + this.name + "' " : ''}leader from ${this.activeAgent.name} to ${this.activeAgent.name}`)
+    private handleUpdatesAndOverrides(invocationOptions: SwarmInvocationOptions<SWARM_CONTEXT>) {
+        // Handle changing the active agent
+        if (invocationOptions.setAgent) {
+            logger.warn(`Overriding swarm ${this.name ? "'" + this.name + "' " : ''}leader from ${this.activeAgent.name} to ${invocationOptions.setAgent.name}`)
+            this.activeAgent = invocationOptions.setAgent
         }
 
+        // handle
         this.context = {
             ...this.context,
-            ...invocationOptions.updatedContext
+            ...invocationOptions.contextUpdate
         }
-
-        if (invocationOptions.overrideMessages && invocationOptions.overrideMessages.length) {
-            this.messages = invocationOptions.overrideMessages
-            logger.warn(`Overriding swarm ${this.name ? "'" + this.name + "' " : ''} messages...`)
-        }
-
+        logger.debug(`Updated`)
     }
 
     /**
@@ -148,66 +139,80 @@ export class Swarm {
      * @param tools
      * @private
      */
-    private wrapAgentToolsToHideContext(tools: Record<string, CoreTool>): Record<string, CoreTool> {
-        const toolsForModel: Record<string, CoreTool> = {}
-        for (const toolName in this.activeAgent.tools) {
-            const agentTool = this.activeAgent.tools[toolName]
+    private wrapTools(tools: Record<string, AgentTool<SWARM_CONTEXT>> | undefined): Record<string, CoreTool> | undefined {
 
-            // handle if the tool requests swarm context - we don't want the LLM generating this, so we strip it
-            // from the tool call
-            if (SWARM_CONTEXT_PROPERTY_NAME in agentTool.parameters.shape) {
-                logger.debug(`Removing swarm context from tool ${toolName}`)
+        if (!tools) return undefined
 
-                // reconfigure the parameters to drop the context property
-                const rewrittenParameters = agentTool.parameters.omit({
-                    [SWARM_CONTEXT_PROPERTY_NAME]: true
-                })
+        // Map each tool into a CoreTool
+        return Object.fromEntries(Object.entries(tools).map((
+                [toolName, agentTool]: [string, AgentTool<SWARM_CONTEXT>]
+            ): [string, CoreTool] => {
 
-                // If the tool has an executor, wrap it with a function that receives just the LLM args, then retrieves
-                // the swarm context before executing the agent tools with it.
-                if (typeof agentTool.execute !== 'undefined') {
-                    logger.debug(`Wrapping tool ${toolName} with an executor`)
-                    const rewrittenExecutor = async (
-                        args: z.infer<typeof rewrittenParameters>,
-                        options: ToolExecutionOptions
-                    ) => {
-                        const swarmContext: Record<string, JSONValue> = this.getContext()
-                        return await agentTool.execute!(
-                            {...args, [SWARM_CONTEXT_PROPERTY_NAME]: swarmContext},
-                            options
-                        )
+
+                let parameters: AgentTool<SWARM_CONTEXT>['parameters'] = agentTool.parameters
+                let executor: CoreTool['execute'] = undefined;
+
+                // If the tool requests the swarm's context, we don't want the LLM to generate it,
+                //  so strip it from the tool call parameters and wrap the executor
+                if (SWARM_CONTEXT_PROPERTY_NAME in agentTool.parameters.shape) {
+                    logger.debug(`Removing ${SWARM_CONTEXT_PROPERTY_NAME} from parameters for tool ${toolName}`)
+
+                    // Set the parameters for the tool so they omit the context; so that the LLM doesn't generate it
+                    parameters = agentTool.parameters.omit({
+                        [SWARM_CONTEXT_PROPERTY_NAME]: true
+                    })
+
+                    // if there's an executor, wrap it with an executor that only receives the LLM-generated arguments
+                    //  (i.e. no context) and that then GETS the context of the swarm, and passed it along with the
+                    //  LLM generated-params (so both LLM params and swarm context) to the original executor.
+                    if (agentTool.execute) {
+                        executor = async (
+                            args: z.infer<typeof parameters>,
+                            options: ToolExecutionOptions
+                        ) => {
+                            const swarmContext: Record<string, JSONValue> = this.getContext()
+
+                            // Execute the agent tool with the arguments and the parameters
+                            return agentTool.execute!(
+                                {
+                                    ...args,
+                                    [SWARM_CONTEXT_PROPERTY_NAME]: swarmContext
+                                },
+                                options
+                            )
+                        }
+
                     }
+                    logger.debug(`Wrapped tool ${toolName}. previous args shape: `, Object.keys(agentTool.parameters.shape))
+                    logger.debug(`New args shape:`, Object.keys(parameters.shape))
 
-                    toolsForModel[toolName] = tool({
-                        // @ts-expect-error it's there I promise!
-                        description: agentTool.description,
-                        parameters: rewrittenParameters,
-                        execute: rewrittenExecutor
-                    })
-                }
-                // If there isn't an executor, just skip it.
-                else {
-                    logger.debug(`Pushing tool ${toolName} without an executor`)
-                    toolsForModel[toolName] = tool({
-                        // @ts-expect-error - it works! we checked!
-                        description: agentTool.description,
-                        parameters: rewrittenParameters
-                    })
                 }
 
-            }
-            // Schema doesn't request context, so just ignore
-            else {
-                toolsForModel[toolName] = agentTool
-            }
+                // If the tool type is handover, ensure there's no executor so that generation stops and we can
+                // stop the agent
+                if (agentTool.type === 'handover') {
+                    executor = undefined
+                }
 
+                // NOTE this looks more complicated (you'd think you could just pass an undefined executor) but you
+                // cannot, so it has to be done this way.
+                const wrappedTool = executor
+                    ? tool({
+                        type: 'function',
+                        description: agentTool.description,
+                        parameters: parameters,
+                        execute: executor
+                    })
+                    : tool({
+                        type: 'function',
+                        description: agentTool.description,
+                        parameters: parameters,
+                    })
 
-        }
-        return toolsForModel
-    }
+                return [toolName, wrappedTool]
+            })
+        )
 
-    public getContext() {
-        return this.context
     }
 
 }
