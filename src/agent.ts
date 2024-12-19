@@ -49,7 +49,7 @@ export type AgentHandoverTool<
         }
     ) => Promise<{
         agent: Agent<SWARM_CONTEXT>,
-        context: SWARM_CONTEXT
+        context?: Partial<SWARM_CONTEXT>
     }>
 
 }

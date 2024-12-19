@@ -7,10 +7,10 @@ import type {
     CoreAssistantMessage,
     CoreSystemMessage,
     CoreUserMessage,
-    CoreToolMessage, CoreMessage, UserContent, GenerateTextResult
+    CoreToolMessage, CoreMessage, UserContent, GenerateTextResult, CoreToolChoice, StepResult, ToolResultPart
 } from 'ai'
 import {tool, generateText} from 'ai'
-import {Agent, type AgentTool} from './agent'
+import {Agent, type AgentHandoverTool, type AgentTool} from './agent'
 import {createLogger} from './logger'
 import type {JSONSerializableObject} from './utils'
 
@@ -42,6 +42,8 @@ export type SwarmInvocationOptions<SWARM_CONTEXT extends JSONSerializableObject>
     setAgent?: Agent<SWARM_CONTEXT>
     maxTurns?: number
     returnToQueen?: boolean // should control of the swarm be returned to the queen post-completion?
+    onStepFinish?: (event: StepResult<any>) => Promise<void> | void;
+
 }
 
 
@@ -50,23 +52,23 @@ export type SwarmInvocationOptions<SWARM_CONTEXT extends JSONSerializableObject>
  */
 export class Swarm<SWARM_CONTEXT extends JSONSerializableObject = JSONSerializableObject> {
 
-    readonly defaultModeL: LanguageModel
+    readonly defaultModel: LanguageModel
     readonly name?: string
     private context: SWARM_CONTEXT
     private messages: Array<SwarmMessage>
     private queen: Agent<SWARM_CONTEXT>
     private activeAgent: Agent<SWARM_CONTEXT>
-    private readonly maxTurns?: number
+    private readonly maxTurns: number
     private returnToQueen: boolean
 
     constructor(options: SwarmOptions<SWARM_CONTEXT>) {
         this.context = options.initialContext || {}
-        this.defaultModeL = options.defaultModel
+        this.defaultModel = options.defaultModel
         this.queen = options.queen
         this.activeAgent = options.queen
         this.messages = options.messages || []
         this.name = options.name
-        this.maxTurns = options.maxTurns
+        this.maxTurns = options.maxTurns || 100
         this.returnToQueen = !!options.returnToQueen
     }
 
@@ -79,19 +81,103 @@ export class Swarm<SWARM_CONTEXT extends JSONSerializableObject = JSONSerializab
         // handle any swarm updates & overrides based on the user input
         this.handleUpdatesAndOverrides(options)
 
-        const maxTurns = options.maxTurns || this.maxTurns
         const messages: Array<CoreMessage> = [
-            {role: 'system', content: this.activeAgent.getInstructions(this.context)},
             ...this.messages,
             {role: 'user', content: options.content}
         ]
-        const tools = this.wrapTools(this.activeAgent.tools)
 
         // Can generate prompt instead too
         let lastResult: GenerateTextResult<any, any>
-        const responseMessages: Array<CoreMessage> = []
+        const responseMessages: Array<SwarmMessage> = []
+
+        // Get the maximum number of turns which is the **minimum** number of turns
+        const maxTotalSteps = options.maxTurns ?? this.maxTurns
+        let stepsLeft = maxTotalSteps
+        do {
+            const maxStepsForThisAgent = this.activeAgent.config.maxTurns ?? maxTotalSteps
+
+            const wrappedTools = this.wrapTools(this.activeAgent.tools),
+                lastResult = await generateText({
+                    model: this.activeAgent.config.model || this.defaultModel,
+                    system: this.activeAgent.getInstructions(this.context),
+                    tools: wrappedTools,
+                    maxSteps: maxStepsForThisAgent,
+                    toolChoice: this.activeAgent.config.toolChoice,
+                    onStepFinish: options.onStepFinish,
+                    messages: [
+                        ...this.messages,
+                        ...responseMessages
+                    ]
+                })
+
+            const stepsTakenThisRound = lastResult.response.messages.filter(
+                message => message.role === 'assistant'
+            ).length
+
+            // On completion, add messages with name of current assistant
+            responseMessages.push(...lastResult.response.messages.map(message => ({
+                ...message,
+                sender: this.activeAgent.name
+            })))
+
+            // if there is an agent handover or an agent reaches max number of turns
+            if (lastResult.finishReason !== 'tool-calls') {
+                // we're done, the model generated text
+                break
+            }
+
+            const {toolCalls, toolResults} = lastResult
+            const toolResultIds = toolResults.map(result => result.toolCallId)
+            const unhandledToolCalls = toolCalls.filter(
+                toolCall => !toolResultIds.includes(toolCall.toolCallId)
+            )
+
+            // Process handover calls
+            const handoverCalls = unhandledToolCalls.filter(
+                toolCall => this.activeAgent.tools?.[toolCall.toolName].type === 'handover'
+            )
+
+            // Take the first handover call
+            let handoverToolResult: ToolResultPart | undefined;
+
+            if (handoverCalls.length > 0) {
+                const handoverTool = this.activeAgent.tools?.[
+                    handoverCalls[0].toolName
+                ]! as AgentHandoverTool<SWARM_CONTEXT, any>
+
+                logger.debug(`Received handover tool call:`, handoverCalls[0].toolName)
+                logger.debug(`received args: `, handoverCalls[0].args)
+
+                // execute the tool call which returns the agent, and a context update
+                const result = await handoverTool.execute({
+                    ...handoverCalls[0].args,
+                    ...this.context
+                }, {})
+
+                logger.info(`Agent ${this.activeAgent.name} handing over to ${result.agent.name} with context update:`, result.context)
+
+                this.activeAgent = result.agent
+                if (result.context) this.context = {
+                    ...this.context,
+                    ...result.context
+                }
+            }
+
+
+            // TODO: Check for tool call - if agent transfer, handle transfer
+
+            // TODO: If not agent transfer - we are either out of MAX steps, or steps for agent.
+            // If out of MAX steps, break; if out of steps for Agent; return to router and resume
+
+
+            // Otherwise if a tool was called and it's not an agent transfer, that means the agent reached max number
+            // of turns and we need to return control to the queen and then decrement maxTurns and keep looping
+        }
+        while (stepsLeft < maxTotalSteps)
 
         // TODO reset the current agent to the queen, if requested.
+
+        // TODO update the history
     }
 
     /**
@@ -139,7 +225,9 @@ export class Swarm<SWARM_CONTEXT extends JSONSerializableObject = JSONSerializab
      * @param tools
      * @private
      */
-    private wrapTools(tools: Record<string, AgentTool<SWARM_CONTEXT>> | undefined): Record<string, CoreTool> | undefined {
+    private wrapTools(
+        tools: Record<string, AgentTool<SWARM_CONTEXT>> | undefined
+    ): Record<string, CoreTool> | undefined {
 
         if (!tools) return undefined
 
@@ -215,4 +303,10 @@ export class Swarm<SWARM_CONTEXT extends JSONSerializableObject = JSONSerializab
 
     }
 
+}
+
+function minimum(a: number, b: number) {
+    return a < b
+        ? a
+        : b
 }
