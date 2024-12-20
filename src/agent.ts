@@ -24,7 +24,10 @@ export type AgentFunctionTool<
         options: {
             abortSignal?: AbortSignal,
         },
-    ) => Promise<FUNCTION_RESULT>
+    ) => Promise<{
+        context?: Partial<SWARM_CONTEXT>
+        result: FUNCTION_RESULT
+    }>
 }
 
 /**

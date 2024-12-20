@@ -82,7 +82,6 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
     public readonly queen: Agent<SWARM_CONTEXT>
     protected context: SWARM_CONTEXT
     protected messages: Array<SwarmMessage>
-    protected _activeAgent: Agent<SWARM_CONTEXT>
     protected readonly maxTurns: number
     protected readonly returnToQueen: boolean
 
@@ -96,7 +95,9 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
         this.maxTurns = options.maxTurns || 100
         this.returnToQueen = !!options.returnToQueen
     }
-    
+
+    protected _activeAgent: Agent<SWARM_CONTEXT>
+
     public get activeAgent() {
         return this._activeAgent as Readonly<Agent<SWARM_CONTEXT>>
     }
@@ -273,7 +274,8 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
             finishReason: lastResult.finishReason,
             activeAgent: this._activeAgent,
             text: lastResult.text,
-            messages: responseMessages
+            messages: responseMessages,
+            context: this.context
         }
     }
 
@@ -338,10 +340,32 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
                 let parameters: AgentTool<SWARM_CONTEXT>['parameters'] = agentTool.parameters
                 let executor: CoreTool['execute'] = undefined;
 
+                let functionWrapper: ((
+                    args: z.infer<typeof parameters>,
+                    options: ToolExecutionOptions
+                ) => Promise<typeof agentTool.execute>) | undefined;
+
+                // Wrap tool to handle context updates if the function requests it
+                if (agentTool.type === 'function') {
+                    functionWrapper = async (
+                        args: z.infer<typeof parameters>,
+                        options: ToolExecutionOptions
+                    ) => {
+
+                        const {result, context} = await agentTool.execute(args, options)
+
+                        if (context) this.context = {
+                            ...this.context,
+                            ...context
+                        }
+                        return result
+                    }
+                }
+
+
                 // If the tool requests the swarm's context, we don't want the LLM to generate it,
                 //  so strip it from the tool call parameters and wrap the executor
                 if (SWARM_CONTEXT_PROPERTY_NAME in agentTool.parameters.shape) {
-
                     // Set the parameters for the tool so they omit the context; so that the LLM doesn't generate it
                     parameters = agentTool.parameters.omit({
                         [SWARM_CONTEXT_PROPERTY_NAME]: true
@@ -355,20 +379,24 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
                             args: z.infer<typeof parameters>,
                             options: ToolExecutionOptions
                         ) => {
-                            const swarmContext = this.getContext()
 
+                            const swarmContext = this.getContext()
                             // Execute the agent tool with the arguments and the parameters
-                            return agentTool.execute!(
-                                {
+                            return functionWrapper
+                                ? functionWrapper({
                                     ...args,
                                     [SWARM_CONTEXT_PROPERTY_NAME]: swarmContext
-                                },
-                                options
-                            )
+                                }, options)
+                                : agentTool.execute!(
+                                    {
+                                        ...args,
+                                        [SWARM_CONTEXT_PROPERTY_NAME]: swarmContext
+                                    },
+                                    options
+                                )
                         }
 
                     }
-
                 }
 
                 // If the tool type is handover, ensure there's no executor so that generation stops and we can
