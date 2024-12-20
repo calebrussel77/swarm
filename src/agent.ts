@@ -16,8 +16,8 @@ const logger = createLogger(__filename)
  * Type for an agent FUNCTION tool, distinct from a HANDOVER tools
  */
 export type AgentFunctionTool<
-    SWARM_CONTEXT extends JSONSerializableObject,
-    TOOL_PARAMETERS extends z.ZodType<any>,
+    SWARM_CONTEXT extends object = JSONSerializableObject,
+    TOOL_PARAMETERS extends z.ZodType<any> = z.AnyZodObject,
     FUNCTION_RESULT = any
 > = {
     type?: 'function' | undefined,
@@ -36,8 +36,8 @@ export type AgentFunctionTool<
  * IF the handover tool has parameters
  */
 export type AgentHandoverTool<
-    SWARM_CONTEXT extends JSONSerializableObject,
-    TOOL_PARAMETERS extends z.ZodType<any>
+    SWARM_CONTEXT extends object = JSONSerializableObject,
+    TOOL_PARAMETERS extends z.ZodType<any> = z.AnyZodObject
 > = {
     type: 'handover',
     description?: string,
@@ -54,7 +54,7 @@ export type AgentHandoverTool<
 
 }
 
-export type AgentTool<SWARM_CONTEXT extends JSONSerializableObject> =
+export type AgentTool<SWARM_CONTEXT extends object = JSONSerializableObject> =
     AgentFunctionTool<SWARM_CONTEXT, any, any> |
     AgentHandoverTool<SWARM_CONTEXT, any>
 
@@ -62,7 +62,7 @@ export type AgentTool<SWARM_CONTEXT extends JSONSerializableObject> =
 /**
  * Agent options
  */
-export type AgentOptions<SWARM_CONTEXT extends JSONSerializableObject = JSONSerializableObject> = {
+export type AgentOptions<SWARM_CONTEXT extends object = JSONSerializableObject> = {
     name: string
     description: string
     model?: LanguageModel
@@ -78,7 +78,7 @@ export type AgentOptions<SWARM_CONTEXT extends JSONSerializableObject = JSONSeri
 /**
  * The agent class; sensitive to the shape of the swarm's context
  */
-export class Agent<SWARM_CONTEXT extends JSONSerializableObject = JSONSerializableObject> {
+export class Agent<SWARM_CONTEXT extends object = JSONSerializableObject> {
 
     public config: Omit<AgentOptions<SWARM_CONTEXT>, 'name' | 'description' | 'tools'>
     public name: string

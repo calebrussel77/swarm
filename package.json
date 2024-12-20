@@ -13,7 +13,7 @@
   },
   "scripts": {
     "build": "bun run build.ts",
-    "test": "bun test"
+    "test": "bun test --timeout 20000"
   },
   "files": [
     "dist"

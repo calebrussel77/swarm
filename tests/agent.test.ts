@@ -5,7 +5,8 @@ import {openai} from '@ai-sdk/openai'
 import {tool} from 'ai'
 import z from 'zod'
 
-import {jsonValueSchema} from '../src/utils'
+import {type JSONSerializableObject, jsonValueSchema} from '../src/utils'
+import logger from '../src/logger'
 
 describe('Agent Initialization tests', () => {
 
@@ -22,15 +23,17 @@ describe('Agent Initialization tests', () => {
 describe('Agent text generation', async () => {
     test('Generate text', async () => {
 
-        const salesAgent = new Agent({
+        interface SalesContext {
+            topic: string | null
+        }
+        const salesAgent = new Agent<SalesContext>({
             name: 'Kyle the salesman',
             description: 'Agent to answer sales queries',
-            instructions: 'You answer all sales questions about salesforce to the best of your ability.'
+            instructions: 'You are a salesman for Salesforce. You answer all sales questions about salesforce to the best of your ability.'
         })
 
-        // TODO allow passing template type into swarm and agent for swarm context
-        const routerAgent = new Agent({
-            name: 'Example agent',
+        const receptionist = new Agent<SalesContext>({
+            name: 'Receptionist',
             description: 'A simple agent that answers user queries',
             instructions: 'You help users talk to the person that they want to talk to by routing them appropriately.',
             tools: {
@@ -46,19 +49,38 @@ describe('Agent text generation', async () => {
                         return "70 degrees fahrenheit and sunny"
                     }
                 },
+                transfer_to_sales: {
+                    type: 'handover',
+                    description: 'Transfer the conversation to a sales agent who can answer questions about sales',
+                    parameters: z.object({
+                        topic: z.string().describe('The topic of the sales conversation')
+                    }),
+                    execute: async ({topic}) => {
+                        return {
+                            agent: salesAgent,
+                        }
+                    }
+                }
             }
 
         })
-        const swarm = new Swarm<{}>({
+
+        const swarm = new Swarm<SalesContext>({
             name: 'Example swarm',
-            queen: routerAgent,
+            queen: receptionist,
             defaultModel: openai('gpt-4o-mini'),
-            initialContext: {}
+            initialContext: {topic: null},
         })
 
         const result = await swarm.generateText({
-            content: 'Can I talk to sales?'
+            content: 'Can I talk to sales about salesforce AI Agents?',
+            onStepFinish: ({text, stepType, toolCalls, toolResults}, context) => {
+            }
         })
+
+        expect(result.activeAgent.name).toEqual(salesAgent.name)
+
+        logger.debug(`Generation result:`, result)
 
     })
 })
