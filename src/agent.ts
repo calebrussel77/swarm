@@ -1,12 +1,8 @@
 import {type CoreTool, type CoreToolChoice, type LanguageModel, type LanguageModelV1, tool} from 'ai'
 import nunjucks from 'nunjucks'
 import z from 'zod'
-import {createLogger} from './logger'
 import {randomUUID} from 'node:crypto'
-
 import {type JSONSerializableObject, jsonValueSchema} from './utils'
-
-const logger = createLogger(__filename)
 
 /**
  * Pulled from vercel AI SDK; useful type defs

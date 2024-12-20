@@ -1,20 +1,22 @@
 import z from 'zod'
 import type {
     CoreTool,
-    JSONValue,
     LanguageModel,
     ToolExecutionOptions,
     CoreAssistantMessage,
     CoreSystemMessage,
     CoreUserMessage,
-    CoreToolMessage, CoreMessage, UserContent, GenerateTextResult, CoreToolChoice, StepResult, ToolResultPart
+    CoreToolMessage,
+    CoreMessage,
+    UserContent,
+    GenerateTextResult,
+    StepResult,
+    ToolResultPart
 } from 'ai'
 import {tool, generateText} from 'ai'
 import {Agent, type AgentHandoverTool, type AgentTool} from './agent'
-import {createLogger} from './logger'
 import type {JSONSerializableObject} from './utils'
-
-const logger = createLogger(__filename)
+import {openai} from '@ai-sdk/openai'
 
 const SWARM_CONTEXT_PROPERTY_NAME = 'swarmContext'
 
@@ -24,7 +26,7 @@ export type SwarmMessage = (CoreAssistantMessage & { sender?: string }) |
     CoreSystemMessage
 
 export type SwarmOptions<SWARM_CONTEXT extends object = JSONSerializableObject> = {
-    defaultModel: LanguageModel
+    defaultModel?: LanguageModel
     queen: Agent<SWARM_CONTEXT>
     initialContext: SWARM_CONTEXT
     messages?: Array<SwarmMessage>
@@ -46,56 +48,74 @@ export type SwarmOptions<SWARM_CONTEXT extends object = JSONSerializableObject> 
 /**
  * Invoke the swarm to handle a user message
  */
-export type SwarmInvocationOptions<SWARM_CONTEXT extends object = JSONSerializableObject> = {
-    content: UserContent,
+export type BaseSwarmInvocationOptions<SWARM_CONTEXT extends object = JSONSerializableObject> = {
     contextUpdate?: Partial<SWARM_CONTEXT>
     setAgent?: Agent<SWARM_CONTEXT>
     maxTurns?: number
     returnToQueen?: boolean // should control of the swarm be returned to the queen post-completion?
     onStepFinish?: (event: StepResult<any>, context: SWARM_CONTEXT) => Promise<void> | void;
-    setMessages?: Array<SwarmMessage>
 }
+
+type SwarmInvocationWithContent = {
+    content: UserContent,
+    messages?: undefined
+}
+
+type SwarmInvocationWithMessages = {
+    content?: undefined
+    messages: Array<SwarmMessage>
+}
+
+export type SwarmInvocationOptions<SWARM_CONTEXT extends object> = BaseSwarmInvocationOptions<SWARM_CONTEXT> & (
+    SwarmInvocationWithContent |
+    SwarmInvocationWithMessages
+    )
 
 
 /**
  * The swarm is the callable that can generate text, generate objects, or stream text.
  */
-export class Swarm<SWARM_CONTEXT extends object = JSONSerializableObject> {
+export class Swarm<SWARM_CONTEXT extends object = any> {
 
     readonly defaultModel: LanguageModel
     readonly name?: string
-    private context: SWARM_CONTEXT
-    private messages: Array<SwarmMessage>
-    private readonly queen: Agent<SWARM_CONTEXT>
-    private activeAgent: Agent<SWARM_CONTEXT>
-    private readonly maxTurns: number
-    private readonly returnToQueen: boolean
+    public readonly queen: Agent<SWARM_CONTEXT>
+    protected context: SWARM_CONTEXT
+    protected messages: Array<SwarmMessage>
+    protected _activeAgent: Agent<SWARM_CONTEXT>
+    protected readonly maxTurns: number
+    protected readonly returnToQueen: boolean
 
     constructor(options: SwarmOptions<SWARM_CONTEXT>) {
-        this.context = options.initialContext || {}
-        this.defaultModel = options.defaultModel
+        this.context = options.initialContext
+        this.defaultModel = options.defaultModel || openai('gpt-4o-mini')
         this.queen = options.queen
-        this.activeAgent = options.queen
+        this._activeAgent = options.queen
         this.messages = options.messages || []
         this.name = options.name
         this.maxTurns = options.maxTurns || 100
         this.returnToQueen = !!options.returnToQueen
     }
+    
+    public get activeAgent() {
+        return this._activeAgent as Readonly<Agent<SWARM_CONTEXT>>
+    }
+
 
     /**
      * Use the swarm to generate text / tool calls
      */
     public async generateText(options: SwarmInvocationOptions<SWARM_CONTEXT>) {
 
-        logger.info(`Triggered swarm for user input: "${options.content}"`)
-
         // handle any swarm updates & overrides based on the user input - active agent, messages, etc
         this.handleUpdatesAndOverrides(options)
 
-        const initialMessages: Array<CoreMessage> = [
-            ...this.messages,
-            {role: 'user', content: options.content}
-        ]
+        const initialMessages: Array<CoreMessage> = options.messages
+            ? this.messages
+            : [
+                ...this.messages,
+                {role: 'user', content: options.content}
+            ]
 
         // Can generate prompt instead too
         let lastResult: GenerateTextResult<any, any>
@@ -105,25 +125,24 @@ export class Swarm<SWARM_CONTEXT extends object = JSONSerializableObject> {
         const maxTotalSteps = options.maxTurns ?? this.maxTurns
         do {
 
-            const initialAgent = this.activeAgent
+            const initialAgent = this._activeAgent
 
-            const maxStepsForThisAgent = this.activeAgent.config.maxTurns ?? maxTotalSteps
+            const maxStepsForThisAgent = this._activeAgent.config.maxTurns ?? maxTotalSteps
 
             // Wrap tools to hide the swarmContext from the LLM; it will be passed once the LLM invokes the tools
-            const wrappedTools = this.wrapTools(this.activeAgent.tools)
+            const wrappedTools = this.wrapTools(this._activeAgent.tools)
             const messages = [
                 ...initialMessages,
                 ...responseMessages
             ]
             // Run the LLM generation.
-            logger.info(`Invoking ${this.activeAgent.name} with input: `, messages)
             lastResult = await generateText({
-                model: this.activeAgent.config.model || this.defaultModel,
-                system: this.activeAgent.getInstructions(this.context),
+                model: this._activeAgent.config.model || this.defaultModel,
+                system: this._activeAgent.getInstructions(this.context),
                 tools: wrappedTools,
                 maxSteps: maxStepsForThisAgent,
                 // @ts-expect-error
-                toolChoice: this.activeAgent.config.toolChoice,
+                toolChoice: this._activeAgent.config.toolChoice,
                 onStepFinish: options.onStepFinish
                     ? (stepResult) => options.onStepFinish!(
                         stepResult,
@@ -133,18 +152,15 @@ export class Swarm<SWARM_CONTEXT extends object = JSONSerializableObject> {
                 messages: messages
             })
 
-            logger.debug(`Agent ${this.activeAgent.name} finished generation`)
-
             // On completion, add messages with name of current assistant
             responseMessages.push(...lastResult.response.messages.map(message => ({
                 ...message,
-                sender: this.activeAgent.name
+                sender: this._activeAgent.name
             })))
 
             // if the current agent generates text, we are done -- it's presenting an answer, so break
             if (['stop', 'length', 'content-filter', 'error'].includes(lastResult.finishReason)) {
                 // we're done, the model generated text
-                logger.debug(`We're done, with finish reason: `, lastResult.finishReason)
                 break
             }
 
@@ -158,7 +174,7 @@ export class Swarm<SWARM_CONTEXT extends object = JSONSerializableObject> {
             // Find handover calls - a tool call _without_ a result and whose "unwrapped" form that the agent has
             //  indicates "type": "handover"
             const handoverCalls = unhandledToolCalls.filter(
-                toolCall => this.activeAgent.tools?.[toolCall.toolName].type === 'handover'
+                toolCall => this._activeAgent.tools?.[toolCall.toolName].type === 'handover'
             )
 
             // So, if we haven't generated text or errored and we're here, that merans that execution either stopped
@@ -167,29 +183,21 @@ export class Swarm<SWARM_CONTEXT extends object = JSONSerializableObject> {
             // Process handover calls; although we only look at the first one if the agent
             let handoverToolResult: ToolResultPart | undefined;
             if (handoverCalls.length > 0) {
-                if (handoverCalls.length > 1) {
-                    logger.warn(`Agent ${this.activeAgent.name} generated ${handoverCalls.length} handovers:`, handoverCalls)
-                    logger.warn(`Only the first requested handover will be processed.`)
-                }
 
                 // Get the _originally_ defined handover tool from the agent's tool list; i.e. the unwrapped tool
-                const handoverTool = this.activeAgent.tools?.[
+                const handoverTool = this._activeAgent.tools?.[
                     handoverCalls[0].toolName
                     ]! as AgentHandoverTool<SWARM_CONTEXT, any>
-
-                logger.debug(`Received handover tool call:`, handoverCalls[0].toolName)
-                logger.debug(`received args: `, handoverCalls[0].args)
 
                 // Execute the handover tool with the arguments generated by the LLM, _and_ the current context
                 const result = await handoverTool.execute({
                     ...handoverCalls[0].args,
                     ...this.context
                 }, {})
-                logger.info(`Agent ${this.activeAgent.name} handing over to ${result.agent.name} with context update:`, result.context)
 
                 // Based on the results of executing the user-supplied handover tool with the LLM-generated args and
                 // context, update the active agent and update the context IFF a context update was specified
-                this.activeAgent = result.agent
+                this._activeAgent = result.agent
                 if (result.context) this.context = {
                     ...this.context,
                     ...result.context
@@ -200,7 +208,7 @@ export class Swarm<SWARM_CONTEXT extends object = JSONSerializableObject> {
                     type: 'tool-result',
                     toolCallId: handoverCalls[0].toolCallId,
                     toolName: handoverCalls[0].toolName,
-                    result: `Handing over to agent ${this.activeAgent.name}`
+                    result: `Handing over to agent ${this._activeAgent.name}`
                 }
             }
 
@@ -248,8 +256,7 @@ export class Swarm<SWARM_CONTEXT extends object = JSONSerializableObject> {
                 initialAgent.config.maxTurns === assistantMessages.length &&
                 responseMessages.filter(message => message.role === 'assistant').length < maxTotalSteps
             ) {
-                logger.warn(`Agent ran out of max steps! Transferring control back to the queen agent`)
-                this.activeAgent = this.queen
+                this._activeAgent = this.queen
             }
         }
         while (
@@ -260,13 +267,13 @@ export class Swarm<SWARM_CONTEXT extends object = JSONSerializableObject> {
         this.messages.push(...responseMessages)
 
         // TODO reset the current agent to the queen, if requested.
-        if (this.returnToQueen) this.activeAgent = this.queen
+        if (this.returnToQueen) this._activeAgent = this.queen
 
         return {
             finishReason: lastResult.finishReason,
-            activeAgent: this.activeAgent,
+            activeAgent: this._activeAgent,
             text: lastResult.text,
-            responseMessages
+            messages: responseMessages
         }
     }
 
@@ -297,20 +304,17 @@ export class Swarm<SWARM_CONTEXT extends object = JSONSerializableObject> {
     private handleUpdatesAndOverrides(invocationOptions: SwarmInvocationOptions<SWARM_CONTEXT>) {
         // Handle changing the active agent
         if (invocationOptions.setAgent) {
-            logger.warn(`Overriding swarm ${this.name ? "'" + this.name + "' " : ''}leader from ${this.activeAgent.name} to ${invocationOptions.setAgent.name}`)
-            this.activeAgent = invocationOptions.setAgent
+            this._activeAgent = invocationOptions.setAgent
         }
 
-        if (invocationOptions.setMessages) {
-            logger.warn(`Overriding swarm's messages with new list of messages!`)
-            this.messages = invocationOptions.setMessages
+        if (invocationOptions.messages) {
+            this.messages = invocationOptions.messages
         }
         // handle
         this.context = {
             ...this.context,
             ...invocationOptions.contextUpdate
         }
-        logger.debug(`Updated`)
     }
 
     /**
@@ -364,8 +368,6 @@ export class Swarm<SWARM_CONTEXT extends object = JSONSerializableObject> {
                         }
 
                     }
-                    logger.silly(`Wrapped tool ${toolName}. previous args shape: `, Object.keys(agentTool.parameters.shape))
-                    logger.silly(`New args shape:`, Object.keys(parameters.shape))
 
                 }
 

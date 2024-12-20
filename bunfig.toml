@@ -1,0 +1,2 @@
+[test]
+coverageThreadhold = { lines = 0.9, functions = 1 }
