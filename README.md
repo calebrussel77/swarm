@@ -404,7 +404,7 @@ interface SalesContext {
 const salesAgent = new Agent<SalesContext>({
   name: 'Sales Agent',
   description: 'Handles sales-related queries',
-  instructions: 'You are a sales representative for our company...',
+  instructions: 'You are a sales representative for our company trying to sell {{topic}}',
 });
 
 const receptionistAgent = new Agent<SalesContext>({
