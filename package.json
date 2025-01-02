@@ -1,6 +1,6 @@
 {
   "name": "agentswarm",
-  "version": "0.0.2",
+  "version": "0.0.4",
   "description": "LLM-agnostic typescript framework for creating OpenAI-style Swarm agents with the Vercel AI SDK",
   "type": "module",
   "main": "./dist/index.cjs",
