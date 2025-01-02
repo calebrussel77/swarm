@@ -58,7 +58,7 @@ describe('Simple Swarm', async () => {
                     swarmContext: z.custom<SalesContext>()
                 }),
                 execute: async ({city, swarmContext}, options) => {
-                    console.log(`Executing weather tool.`)
+                    console.log(`Swarm context:`, swarmContext)
                     return {
                         result: "70 degrees fahrenheit and sunny",
                         context: {
