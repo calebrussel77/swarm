@@ -322,15 +322,18 @@ const receptionistAgent: Agent<SalesContext> = new Agent<SalesContext>({
 new Hive<HIVE_CONTEXT>(options: HiveOptions<HIVE_CONTEXT>)
 ```
 
-#### Options
+#### Hive Options `HiveOptions<HIVE_CONTEXT>`
 
-- `defaultModel`: LanguageModel (optional)
-- `queen`: Agent<HIVE_CONTEXT>
-- `defaultContext`: HIVE_CONTEXT (optional)
+| Name | Type | Description |
+|------|------|-------------|
+| `defaultModel` | `LanguageModel (optional)` | The default language model to be used by agents in the swarm if not specified individually |
+| `queen` | `Agent<HIVE_CONTEXT>` | The initial agent (often an orchestrator) that serves as the entry point for the swarm |
+| `defaultContext` | `HIVE_CONTEXT (optional)` | The default context object to be used when spawning new swarms |
 
 #### Methods
 
-- `spawnSwarm(options?: HiveCreateSwarmOptions<HIVE_CONTEXT>): Swarm<HIVE_CONTEXT>`
+- `spawnSwarm(options?: HiveCreateSwarmOptions<HIVE_CONTEXT>): Swarm<HIVE_CONTEXT>` - creates a swarm based off the hive, 
+with the ability to override certain values if desired
 
 ### Swarm
 
@@ -338,28 +341,58 @@ new Hive<HIVE_CONTEXT>(options: HiveOptions<HIVE_CONTEXT>)
 new Swarm<SWARM_CONTEXT>(options: SwarmOptions<SWARM_CONTEXT>)
 ```
 
-#### Options
+#### Swarm Options `SwarmOptions<SWARM_CONTEXT>`
 
-- `defaultModel`: LanguageModel (optional)
-- `queen`: Agent<SWARM_CONTEXT>
-- `initialContext`: SWARM_CONTEXT
-- `messages`: Array<SwarmMessage> (optional)
-- `name`: string (optional)
-- `maxTurns`: number (optional)
-- `returnToQueen`: boolean (optional)
-
+| Name | Type | Description                                                                                                                 |
+|------|------|-----------------------------------------------------------------------------------------------------------------------------|
+| `defaultModel` | `LanguageModel (optional)` | The default language model to be used by agents in the swarm if not specified individually                                  |
+| `queen` | `Agent<SWARM_CONTEXT>` | The initial agent (often an orchestrator) that serves as the entry point for the swarm                                      |
+| `initialContext` | `SWARM_CONTEXT` | The initial context object for the swarm                                                                                    |
+| `messages` | `Array<SwarmMessage> (optional)` | Initial messages for the swarm, if any                                                                                      |
+| `name` | `string (optional)` | A name for the swarm instance                                                                                               |
+| `maxTurns` | `number (optional)` | Maximum number of turns (tool call & execution iterations) allowed in a single invocation; use to prevent infinite loops    |
+| `returnToQueen` | `boolean (optional)` | Whether to return control to the queen agent after each interaction, or if the currently-active agent should remain active. |
+> **Note**
+> A `SwarmMessage` is extended from `CoreMessage` in the AI SDK, with the exception that each `CoreAssistantMessage` has 
+> a `sender` property set to the `name` of the `agent` in the swarm that generated it.
 #### Methods
+```typescript
+generateText(options: SwarmInvocationOptions<SWARM_CONTEXT>): Promise<GenerateTextResult>
+```
+Generate text with the swarm. Streaming isn't supported yet, but will be soon!
+`SwarmInvocationOptions`: 
 
-- `generateText(options: SwarmInvocationOptions<SWARM_CONTEXT>): Promise<GenerateTextResult>`
-- `getContext(): Readonly<SWARM_CONTEXT>`
-- `updateContext(update: Partial<SWARM_CONTEXT>): Readonly<SWARM_CONTEXT>`
+| Property | Type | Description                                                                                                                                         |
+|----------|------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
+| `contextUpdate` | `Partial<SWARM_CONTEXT>` | Optional. Partial update to the swarm context.                                                                                                      |
+| `setAgent` | `Agent<SWARM_CONTEXT>` | Optional. Sets a specific agent for the swarm invocation, overriding the currently active agent                                                     |
+| `maxTurns` | `number` | Optional. Maximum number of turns allowed for the swarm invocation.                                                                                 |
+| `returnToQueen` | `boolean` | Optional. Determines if control of the swarm should be returned to the queen after completion; overrides the property of the same name on the swarm |
+| `onStepFinish` | `(event: StepResult<any>, context: SWARM_CONTEXT) => Promise<void> \| void` | Optional. Callback function executed after each step finishes.                                                                                      |
+| `content` | `UserContent` | Required if `messages` is not provided. The content for the swarm invocation.                                                                       |
+| `messages` | `Array<SwarmMessage>` | Required if `content` is not provided. An array of swarm messages for the invocation.                                                               |
+
+Notes: 
+- The `content` and `messages` properties are mutually exclusive. You must provide either `content` or `messages`, but not both.
+By default, you should probably only need to set one of these.
+- Swarms can be used in a stateless manner by always setting the `messages` array rather than `content`, and by always setting `returnToQueen` or using `setAgent`
+
+```typescript 
+getContext(): Readonly<SWARM_CONTEXT>
+```
+Retrieve the Swarm's context
+
+```typescript 
+updateContext(update: Partial<SWARM_CONTEXT>): Readonly<SWARM_CONTEXT>
+```
+Force-update the swarm's context external to any agent interactions. 
 
 ## Examples
 
 ### Creating a Simple Sales Swarm
 
 ```typescript
-import { Agent, Hive, Swarm } from 'ai-swarm';
+import { Agent, Hive, Swarm } from '@constellate-ai/swarm';
 import { openai } from '@ai-sdk/openai';
 import z from 'zod';
 
