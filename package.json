@@ -1,6 +1,6 @@
 {
-  "name": "swarm",
-  "version": "0.0.1",
+  "name": "@constellate-ai/swarm",
+  "version": "0.0.2",
   "description": "LLM-agnostic typescript framework for creating OpenAI-style Swarm agents with the Vercel AI SDK",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -29,12 +29,12 @@
     "multi-agent"
   ],
   "license": "MIT",
-  "homepage": "https://github.com/K-Mistele/swarm#readme",
+  "homepage": "https://github.com/constellate-ai/swarm#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/K-Mistele/swarm.git"
+    "url": "git+https://github.com/constellate-ai/swarm.git"
   },
-  "bugs": "https://github.com/K-Mistele/swarm/issues",
+  "bugs": "https://github.com/constellate-ai/swarm/issues",
   "author": "Kyle Mistele <kyle@constellate.ai",
   "devDependencies": {
     "@types/bun": "latest",
