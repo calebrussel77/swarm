@@ -36,7 +36,7 @@ or prompt template and a set of tools.
 - **Swarm**: A collection of agents working together to accomplish tasks.
 - **Hive**: A factory for creating swarms with shared configuration.
 - **Context**: Shared information that can be updated and accessed by agents within a swarm. 
-- **handover**: Transferring control from one agent to another; achieved by a tool call.
+- **Handover**: Transferring control from one agent to another; achieved by a tool call.
 
 ### Agents
 Agents are defined using the `Agent` class. By design, agents are stateless. 
@@ -442,5 +442,3 @@ console.log(result.text);
 console.log(result.activeAgent.name);
 console.log(result.context);
 ```
-
-This example demonstrates how to create a simple sales swarm with a receptionist agent that can transfer to a sales agent when needed.
