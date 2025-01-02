@@ -27,7 +27,7 @@ This library is _not_ strongly opinionated for such applications, but many defau
 ## Installation
 
 ```bash
-npm install @constellate-ai/swarm
+npm install agentswarm
 ```
 
 ## Key Concepts
@@ -93,7 +93,7 @@ This framework provides several options and patterns to avoid these issues.
 ### Creating an Agent
 
 ```typescript
-import { Agent } from '@constellate-ai/swarm';
+import { Agent } from 'agentswarm';
 import { anthropic } from '@ai-sdk/anthropic';
 
 const salesAgent = new Agent<SalesContext>({
@@ -110,7 +110,7 @@ const salesAgent = new Agent<SalesContext>({
 ### Creating a Hive
 
 ```typescript
-import { Hive } from '@constellate-ai/swarm';
+import { Hive } from 'agentswarm';
 import { openai } from '@ai-sdk/openai';
 
 interface SalesContext {
@@ -392,7 +392,7 @@ Force-update the swarm's context external to any agent interactions.
 ### Creating a Simple Sales Swarm
 
 ```typescript
-import { Agent, Hive, Swarm } from '@constellate-ai/swarm';
+import { Agent, Hive, Swarm } from 'agentswarm';
 import { openai } from '@ai-sdk/openai';
 import z from 'zod';
 
