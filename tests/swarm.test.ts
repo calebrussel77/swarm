@@ -184,3 +184,32 @@ describe('Simple Swarm', async () => {
         expect(toolCalls).toContain('get_current_weather')
     })
 })
+
+describe('Streaming tests', async () => {
+
+    const agent = new Agent({
+        name: 'Haiku writer',
+        description: 'Always responds in haikus',
+        instructions: 'Write a haiku in response to the user\'s request',
+    })
+    const swarm = new Swarm({
+        defaultModel: openai('gpt-4o-mini'),
+        name: 'Test Swarm',
+        queen: agent,
+        initialContext: {}
+    })
+
+    test('Stream should return text', async () => {
+
+        const result = await swarm.streamText({
+            content: 'Write a haiku about dragonflies',
+        })
+
+        for await (const text of result.textStream) {
+            console.log(`Text:`, text)
+        }
+        for await (const chunk of result.fullStream) {
+            console.log(`Full:`, chunk)
+        }
+    })
+})

@@ -11,11 +11,17 @@ import type {
     UserContent,
     GenerateTextResult,
     StepResult,
-    ToolResultPart
+    ToolResultPart,
+    StreamTextResult, TextStreamPart, FinishReason
 } from 'ai'
-import {tool, generateText} from 'ai'
+import {tool, generateText, streamText} from 'ai'
 import {Agent, type AgentHandoverTool, type AgentTool} from './agent'
-import type {JSONSerializableObject} from './utils'
+import {
+    type AsyncIterableStream, createAsyncIterableStream,
+    createResolvablePromise,
+    createStitchableStream, type EnrichedStreamPart,
+    type JSONSerializableObject
+} from './utils'
 import {openai} from '@ai-sdk/openai'
 
 const SWARM_CONTEXT_PROPERTY_NAME = 'swarmContext'
@@ -122,7 +128,6 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
         let lastResult: GenerateTextResult<any, any>
         const responseMessages: Array<SwarmMessage> = []
 
-        // Get the maximum number of turns which is the **minimum** number of turns
         const maxTotalSteps = options.maxTurns ?? this.maxTurns
         do {
 
@@ -277,6 +282,148 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
             messages: responseMessages,
             context: this.context
         }
+    }
+
+
+    public async streamText(options: SwarmInvocationOptions<SWARM_CONTEXT>) {
+
+        // swarm updates and overrides
+        this.handleUpdatesAndOverrides(options)
+        const initialMessages: Array<CoreMessage> = options.messages
+            ? this.messages
+            : [
+                ...this.messages,
+                {role: 'user', content: options.content}
+            ]
+
+        let lastResult: StreamTextResult<any>
+        const responseMessages: Array<SwarmMessage> = []
+        const maxTotalSteps = options.maxTurns ?? this.maxTurns
+
+        const finishReasonPromise = createResolvablePromise<FinishReason>()
+        const activeAgentPromise = createResolvablePromise<Readonly<Agent>>()
+        const textPromise = createResolvablePromise<string>()
+        const allResponseMessagesPromise = createResolvablePromise<Array<SwarmMessage>>()
+        const contextPromise = createResolvablePromise<SWARM_CONTEXT>()
+
+        let stitchableStream = createStitchableStream()
+        let stream = stitchableStream.stream
+        let addStream = stitchableStream.addStream
+        let closeStream = stitchableStream.close
+
+        function teeStream() {
+            const [stream1, stream2] = stream.tee()
+            stream = stream2
+            return stream1
+        }
+
+        const textStream = createAsyncIterableStream(
+            teeStream().pipeThrough(
+                new TransformStream<EnrichedStreamPart<any, any>['part']>({
+                    transform(streamPart, controller) {
+                        if (streamPart?.type === 'text-delta') {
+                            controller.enqueue(streamPart.textDelta)
+                        }
+                        else if (streamPart?.type === 'error') {
+                            controller.error(streamPart.error)
+                        }
+                    }
+                })
+            )
+        )
+
+        const fullStream = createAsyncIterableStream(
+            teeStream().pipeThrough(
+                new TransformStream<
+                    EnrichedStreamPart<any, any>['part'],
+                    TextStreamPart<any>
+                >({
+                    transform(streamPart, controller) {
+                        controller.enqueue(streamPart);
+                    },
+                }),
+            ),
+        )
+        /*do {
+
+        }
+        while (responseMessages.filter(message => message.role === 'assistant').length < maxTotalSteps)
+
+        // TODO update the history
+        this.messages.push(...responseMessages)
+        if (this.returnToQueen) this._activeAgent = this.queen*/
+        const messages = [
+            ...initialMessages,
+            ...responseMessages
+        ]
+        const maxStepsForThisAgent = this._activeAgent.config.maxTurns ?? maxTotalSteps
+        const result = streamText({
+            model: this._activeAgent.config.model ?? this.defaultModel,
+            system: this._activeAgent.getInstructions(this.context),
+            tools: this.wrapTools(this._activeAgent.tools),
+            maxSteps: maxStepsForThisAgent,
+            // @ts-expect-error
+            toolChoice: this._activeAgent.config.toolChoice,
+            onStepFinish: options.onStepFinish
+                ? (stepResult) => options.onStepFinish!(
+                    stepResult,
+                    this.context
+                )
+                : undefined,
+            messages: messages,
+            onFinish: async ({finishReason, response, text}) => {
+                finishReasonPromise.resolve(finishReason)
+                activeAgentPromise.resolve(this._activeAgent as Readonly<Agent>)
+                textPromise.resolve(text)
+                allResponseMessagesPromise.resolve(response.messages) // TODO this doesn't work
+                contextPromise.resolve(this.context)
+            }
+        })
+
+        addStream(result.fullStream)
+
+        // Wait until text generation finishes, then run the second and pipe it
+        result.text.then(t => {
+            console.log(`text:\n`, t)
+            const secondResult = streamText({
+                model: this._activeAgent.config.model ?? this.defaultModel,
+                system: this._activeAgent.getInstructions(this.context),
+                tools: this.wrapTools(this._activeAgent.tools),
+                maxSteps: maxStepsForThisAgent,
+                // @ts-expect-error
+                toolChoice: this._activeAgent.config.toolChoice,
+                onStepFinish: options.onStepFinish
+                    ? (stepResult) => options.onStepFinish!(
+                        stepResult,
+                        this.context
+                    )
+                    : undefined,
+                messages: [...this.messages, {role: 'user', content: 'write a haiku about frogs'}],
+                onFinish: async ({finishReason, response, text}) => {
+                    finishReasonPromise.resolve(finishReason)
+                    activeAgentPromise.resolve(this._activeAgent as Readonly<Agent>)
+                    textPromise.resolve(text)
+                    allResponseMessagesPromise.resolve(response.messages) // TODO this doesn't work
+                    contextPromise.resolve(this.context)
+                }
+            })
+            addStream(secondResult.fullStream)
+            secondResult.text.then(text => {
+                console.log(`second text:\n`, text)
+                closeStream()
+            })
+        })
+
+        return {
+            finishReason: finishReasonPromise.promise,
+            activeAgent: activeAgentPromise.promise,
+            text: activeAgentPromise.promise,
+            messages: allResponseMessagesPromise.promise,
+            context: contextPromise.promise,
+            textStream: textStream,
+            fullStream: fullStream
+        }
+
     }
 
     /**
