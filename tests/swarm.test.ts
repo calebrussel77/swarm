@@ -4,7 +4,8 @@ import {openai} from '@ai-sdk/openai'
 import {Agent} from '../src/agent'
 import z from 'zod'
 import {Hive} from '../src/hive'
-import {type TextPart, tool, type ToolCallPart} from 'ai'
+import {type TextPart, type TextStreamPart, tool, type ToolCallPart} from 'ai'
+import type {ExtendedTextStreamPart} from '../src/utils'
 
 
 describe('Swarm Initialization tests', () => {
@@ -58,7 +59,6 @@ describe('Simple Swarm', async () => {
                     swarmContext: z.custom<SalesContext>()
                 }),
                 execute: async ({city, swarmContext}, options) => {
-                    console.log(`Swarm context:`, swarmContext)
                     return {
                         result: "70 degrees fahrenheit and sunny",
                         context: {
@@ -185,7 +185,7 @@ describe('Simple Swarm', async () => {
     })
 })
 
-describe('Streaming tests', async () => {
+describe('Single-agent swarm streaming', async () => {
 
     const agent = new Agent({
         name: 'Haiku writer',
@@ -199,17 +199,154 @@ describe('Streaming tests', async () => {
         initialContext: {}
     })
 
-    test('Stream should return text', async () => {
+    test('Streaming text deltas should match finished text', async () => {
 
-        const result = await swarm.streamText({
+        const streamResult = swarm.streamText({
             content: 'Write a haiku about dragonflies',
         })
 
-        for await (const text of result.textStream) {
-            console.log(`Text:`, text)
+        // Ensure that the stream result matches the text
+        let text = ''
+        for await (const token of streamResult.textStream) {
+            text += token
         }
-        for await (const chunk of result.fullStream) {
-            console.log(`Full:`, chunk)
+        const textResult = await streamResult.text
+        expect(textResult).toEqual(text)
+
+    })
+
+    test('Streaming should have agent information on each chunk', async () => {
+        const streamResult = swarm.streamText({
+            content: 'Write a haiku about dragonflies'
+        })
+
+        // Ensure that streamed chunks have the `type` field and have the agent's information on them
+        for await (const chunk of streamResult.fullStream) {
+            expect(chunk).toHaveProperty('type')
+            expect(chunk).toHaveProperty('agent', {id: agent.uuid, name: agent.name})
         }
     })
+})
+
+describe('Multi-agent swarm streaming', async () => {
+    interface SalesContext {
+        topic: string | null
+        weather: string | null
+    }
+
+    const salesAgent: Agent<SalesContext> = new Agent<SalesContext>({
+        name: 'Kyle the salesman',
+        description: 'Agent to answer sales queries',
+        instructions: 'You are a salesman for Salesforce. You answer all sales questions about salesforce to the best of your ability.'
+    })
+    const receptionistAgent: Agent<SalesContext> = new Agent<SalesContext>({
+        name: 'Receptionist',
+        description: 'A simple agent that answers user queries',
+        instructions: 'You help users talk to the person that they want to talk to by routing them appropriately.',
+        tools: {
+            get_current_weather: {
+                type: 'function',
+                description: 'Get the weather in a given city',
+                parameters: z.object({
+                    city: z.string().describe('The city to get the weather for.'),
+                    swarmContext: z.custom<SalesContext>()
+                }),
+                execute: async ({city, swarmContext}, options) => {
+                    return {
+                        result: "70 degrees fahrenheit and sunny",
+                        context: {
+                            topic: 'the weather',
+                            weather: '70 degrees and sunny'
+                        }
+                    }
+                }
+            },
+            transfer_to_sales: {
+                type: 'handover',
+                description: 'Transfer the conversation to a sales agent who can answer questions about sales',
+                parameters: z.object({
+                    topic: z.string().describe('The topic of the sales conversation')
+                }),
+                execute: async ({topic}) => {
+                    return {
+                        agent: salesAgent,
+                        context: {topic}
+                    }
+                }
+            }
+        }
+
+    })
+
+    const hive = new Hive<SalesContext>({
+        queen: receptionistAgent,
+        defaultModel: openai('gpt-4o-mini'),
+        defaultContext: {topic: null, weather: null},
+    })
+
+    let swarm: Swarm<SalesContext>
+
+    beforeEach(() => {
+        swarm = hive.spawnSwarm({})
+    })
+
+    test('Tool calls should be streamed', async () => {
+
+        const result = swarm.streamText({
+            content: 'What is the weather today in Dallas, TX?'
+        })
+
+        const chunks: Array<ExtendedTextStreamPart<any> & { agent: { id: string, name: string } }> = []
+        for await (const chunk of result.fullStream) {
+            expect(chunk).toHaveProperty('agent')
+            expect(chunk.agent).toEqual({id: receptionistAgent.uuid, name: receptionistAgent.name})
+            chunks.push(chunk)
+        }
+
+        const toolRelatedChunks = chunks.filter(c => c.type.includes('tool'))
+
+        expect(toolRelatedChunks.length).toBeGreaterThan(1)
+
+        const toolStreamingStartChunk = toolRelatedChunks.find(c => c.type === 'tool-call-streaming-start')
+        expect(toolStreamingStartChunk).toBeDefined()
+        expect(toolStreamingStartChunk?.toolName).toEqual('get_current_weather')
+        expect(toolStreamingStartChunk).not.toHaveProperty('handover')
+
+        // make sure arguments match
+        const toolCallDeltaArgs = toolRelatedChunks.filter(c => c.type === 'tool-call-delta')
+            .reduce((accumulator, current, idx, values) => {
+                return accumulator + current.argsTextDelta
+            }, '')
+
+        const toolCall = toolRelatedChunks.find(c => c.type === 'tool-call')
+        expect(toolCall?.args).toEqual(JSON.parse(toolCallDeltaArgs))
+
+        const toolResults = toolRelatedChunks.find(c => c.type === 'tool-result')
+        expect(toolResults?.result).toEqual("70 degrees fahrenheit and sunny")
+
+    })
+
+    test('Tool calls should match the active agent', async () => {
+        const result = swarm.streamText({
+            content: 'I\'d like to talk to someone about salesforce AI agents'
+        })
+
+        const chunks = []
+        let handedOver: boolean = false
+        for await (const chunk of result.fullStream) {
+            if (chunk.type === 'finish' || chunk.type === 'step-finish') continue
+            console.log(chunk)
+
+            if (!handedOver) expect(chunk.agent.name).toEqual(receptionistAgent.name);
+            else expect(chunk.agent.name).toEqual(salesAgent.name);
+
+            if (chunk.type === 'tool-result' && chunk.handedOverTo) handedOver = true
+
+            chunks.push(chunk)
+        }
+        
+
+    })
+
+
 })

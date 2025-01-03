@@ -12,14 +12,16 @@ import type {
     GenerateTextResult,
     StepResult,
     ToolResultPart,
-    StreamTextResult, TextStreamPart, FinishReason
+    StreamTextResult,
+    TextStreamPart,
+    FinishReason
 } from 'ai'
 import {tool, generateText, streamText} from 'ai'
 import {Agent, type AgentHandoverTool, type AgentTool} from './agent'
 import {
     type AsyncIterableStream, createAsyncIterableStream,
     createResolvablePromise,
-    createStitchableStream, type EnrichedStreamPart,
+    createStitchableStream, type EnrichedStreamPart, type ExtendedEnrichedStreamPart, type ExtendedTextStreamPart,
     type JSONSerializableObject
 } from './utils'
 import {openai} from '@ai-sdk/openai'
@@ -133,20 +135,13 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
 
             const initialAgent = this._activeAgent
 
-            const maxStepsForThisAgent = this._activeAgent.config.maxTurns ?? maxTotalSteps
-
-            // Wrap tools to hide the swarmContext from the LLM; it will be passed once the LLM invokes the tools
-            const wrappedTools = this.wrapTools(this._activeAgent.tools)
-            const messages = [
-                ...initialMessages,
-                ...responseMessages
-            ]
             // Run the LLM generation.
             lastResult = await generateText({
                 model: this._activeAgent.config.model || this.defaultModel,
                 system: this._activeAgent.getInstructions(this.context),
-                tools: wrappedTools,
-                maxSteps: maxStepsForThisAgent,
+                tools: this.wrapTools(this._activeAgent.tools), // Wrap tools to hide the swarmContext from the LLM; it
+                                                                // will be passed once the LLM invokes the tools
+                maxSteps: this._activeAgent.config.maxTurns ?? maxTotalSteps,
                 // @ts-expect-error
                 toolChoice: this._activeAgent.config.toolChoice,
                 onStepFinish: options.onStepFinish
@@ -155,7 +150,7 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
                         this.context
                     )
                     : undefined,
-                messages: messages
+                messages: [...initialMessages, ...responseMessages]
             })
 
             // On completion, add messages with name of current assistant
@@ -284,8 +279,11 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
         }
     }
 
-
-    public async streamText(options: SwarmInvocationOptions<SWARM_CONTEXT>) {
+    /**
+     * Stream from the swarm
+     * @param options
+     */
+    public streamText(options: SwarmInvocationOptions<SWARM_CONTEXT>) {
 
         // swarm updates and overrides
         this.handleUpdatesAndOverrides(options)
@@ -296,128 +294,241 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
                 {role: 'user', content: options.content}
             ]
 
-        let lastResult: StreamTextResult<any>
-        const responseMessages: Array<SwarmMessage> = []
-        const maxTotalSteps = options.maxTurns ?? this.maxTurns
-
+        // Create promises that will be returned immediately and then resolved as soon as everything is available
         const finishReasonPromise = createResolvablePromise<FinishReason>()
         const activeAgentPromise = createResolvablePromise<Readonly<Agent>>()
         const textPromise = createResolvablePromise<string>()
         const allResponseMessagesPromise = createResolvablePromise<Array<SwarmMessage>>()
         const contextPromise = createResolvablePromise<SWARM_CONTEXT>()
 
-        let stitchableStream = createStitchableStream()
+        // Set up a stream that can have other streams stitched into it
+        let stitchableStream = createStitchableStream<ExtendedTextStreamPart<any> | TextStreamPart<any>>()
         let stream = stitchableStream.stream
         let addStream = stitchableStream.addStream
         let closeStream = stitchableStream.close
+        let enqueue = stitchableStream.enqueue
 
+        // Function to split the stream
         function teeStream() {
             const [stream1, stream2] = stream.tee()
             stream = stream2
             return stream1
         }
 
-        const textStream = createAsyncIterableStream(
-            teeStream().pipeThrough(
-                new TransformStream<EnrichedStreamPart<any, any>['part']>({
-                    transform(streamPart, controller) {
-                        if (streamPart?.type === 'text-delta') {
-                            controller.enqueue(streamPart.textDelta)
-                        }
-                        else if (streamPart?.type === 'error') {
-                            controller.error(streamPart.error)
-                        }
+        // Create a copy of the stream that's ONLY text, no tool calls. each streamed thing is just text.
+        const textStream = createAsyncIterableStream(teeStream().pipeThrough(
+            new TransformStream<EnrichedStreamPart<any, any>['part']>({
+                transform: (streamPart, controller) => {
+                    if (streamPart?.type === 'text-delta') {
+                        controller.enqueue(streamPart.textDelta)
                     }
-                })
-            )
-        )
-
-        const fullStream = createAsyncIterableStream(
-            teeStream().pipeThrough(
-                new TransformStream<
-                    EnrichedStreamPart<any, any>['part'],
-                    TextStreamPart<any>
-                >({
-                    transform(streamPart, controller) {
-                        controller.enqueue(streamPart);
-                    },
-                }),
-            ),
-        )
-        /*do {
-
-        }
-        while (responseMessages.filter(message => message.role === 'assistant').length < maxTotalSteps)
-
-        // TODO update the history
-        this.messages.push(...responseMessages)
-        if (this.returnToQueen) this._activeAgent = this.queen*/
-        const messages = [
-            ...initialMessages,
-            ...responseMessages
-        ]
-        const maxStepsForThisAgent = this._activeAgent.config.maxTurns ?? maxTotalSteps
-        const result = streamText({
-            model: this._activeAgent.config.model ?? this.defaultModel,
-            system: this._activeAgent.getInstructions(this.context),
-            tools: this.wrapTools(this._activeAgent.tools),
-            maxSteps: maxStepsForThisAgent,
-            // @ts-expect-error
-            toolChoice: this._activeAgent.config.toolChoice,
-            onStepFinish: options.onStepFinish
-                ? (stepResult) => options.onStepFinish!(
-                    stepResult,
-                    this.context
-                )
-                : undefined,
-            messages: messages,
-            onFinish: async ({finishReason, response, text}) => {
-                finishReasonPromise.resolve(finishReason)
-                activeAgentPromise.resolve(this._activeAgent as Readonly<Agent>)
-                textPromise.resolve(text)
-                allResponseMessagesPromise.resolve(response.messages) // TODO this doesn't work
-                contextPromise.resolve(this.context)
-            }
-        })
-
-        addStream(result.fullStream)
-
-        // Wait until text generation finishes, then run the second and pipe it
-        result.text.then(t => {
-            console.log(`text:\n`, t)
-            const secondResult = streamText({
-                model: this._activeAgent.config.model ?? this.defaultModel,
-                system: this._activeAgent.getInstructions(this.context),
-                tools: this.wrapTools(this._activeAgent.tools),
-                maxSteps: maxStepsForThisAgent,
-                // @ts-expect-error
-                toolChoice: this._activeAgent.config.toolChoice,
-                onStepFinish: options.onStepFinish
-                    ? (stepResult) => options.onStepFinish!(
-                        stepResult,
-                        this.context
-                    )
-                    : undefined,
-                messages: [...this.messages, {role: 'user', content: 'write a haiku about frogs'}],
-                onFinish: async ({finishReason, response, text}) => {
-                    finishReasonPromise.resolve(finishReason)
-                    activeAgentPromise.resolve(this._activeAgent as Readonly<Agent>)
-                    textPromise.resolve(text)
-                    allResponseMessagesPromise.resolve(response.messages) // TODO this doesn't work
-                    contextPromise.resolve(this.context)
+                    else if (streamPart?.type === 'error') {
+                        controller.error(streamPart.error)
+                    }
                 }
             })
-            addStream(secondResult.fullStream)
-            secondResult.text.then(text => {
-                console.log(`second text:\n`, text)
-                closeStream()
-            })
-        })
+        ))
 
+        // Create a copy of the stream that's everything generated by the stream; also adds the agent info
+        // so client code can tell which agent is streaming.
+        const fullStream = createAsyncIterableStream(teeStream().pipeThrough(
+            new TransformStream<
+                ExtendedEnrichedStreamPart<any, any>['part'] | EnrichedStreamPart<any, any>['part'],
+                ExtendedTextStreamPart<any>
+            >({
+                transform: (streamPart, controller) => {
+                    if ('agent' in streamPart) controller.enqueue(streamPart);
+                    else controller.enqueue({
+                        ...streamPart,
+                        agent: {
+                            id: this._activeAgent.uuid,
+                            name: this._activeAgent.name
+                        }
+                    });
+                },
+            }),
+        ));
+
+
+        // Inline an async function so we can handle generation and streaming in the background but return immediately
+        (async () => {
+            let lastResult: StreamTextResult<any>
+            const responseMessages: Array<SwarmMessage> = []
+            const maxTotalSteps = options.maxTurns ?? this.maxTurns;
+
+            do {
+                const initialAgent = this._activeAgent
+                const maxStepsForThisAgent = this._activeAgent.config.maxTurns ?? maxTotalSteps
+                const messages = [...initialMessages, ...responseMessages]
+
+                // Run generation
+                lastResult = streamText({
+                    model: this._activeAgent.config.model || this.defaultModel,
+                    system: this._activeAgent.getInstructions(this.context),
+                    tools: this.wrapTools(this._activeAgent.tools),
+                    maxSteps: this._activeAgent.config.maxTurns ?? maxTotalSteps,
+                    // @ts-expect-error
+                    toolChoice: this._activeAgent.config.toolChoice,
+                    onStepFinish: options.onStepFinish
+                        ? (stepResult) => options.onStepFinish!(
+                            stepResult,
+                            this.context
+                        )
+                        : undefined,
+                    messages: [...initialMessages, ...responseMessages],
+                    experimental_toolCallStreaming: true
+                });
+
+                // It returns instantly, so add the stream, then await the response to be generated
+                addStream(lastResult.fullStream)
+
+                // add messages once finished
+                const [response, finishReason, toolResults, toolCalls] = await Promise.all([
+                    lastResult.response,
+                    lastResult.finishReason,
+                    lastResult.toolResults,
+                    lastResult.toolCalls
+                ])
+
+                responseMessages.push(...response.messages.map(message => ({
+                    ...message,
+                    sender: this._activeAgent.name
+                })))
+
+                // If the current agent generates text, we are done -- it's presenting an answer, so break
+                if (['stop', 'length', 'content-filter', 'error'].includes(finishReason)) {
+                    break;
+                }
+
+                // find unhandled calls by looking for a call with an ID that is not included int he tool call result
+                const toolResultIds = toolResults.map(result => result.toolCallId)
+                const unhandledToolCalls = toolCalls.filter(
+                    toolCall => !toolResultIds.includes(toolCall.toolCallId)
+                )
+
+                // Find handover calls - a tool call _without_ a result and whose "unwrapped" form that the agent has
+                //  indicates "type": "handover"
+                const handoverCalls = unhandledToolCalls.filter(
+                    toolCall => this._activeAgent.tools?.[toolCall.toolName].type === 'handover'
+                )
+
+                // So, if we haven't generated text or errored and we're here, that merans that execution either stopped
+                //  Because of an agent transfer, which we already handled, OR because the agent ran out of max steps
+
+                // Process handover calls; although we only look at the first one if the agent
+                let handoverToolResult: Extract<ExtendedTextStreamPart<any>, {type: 'tool-result'}> | undefined = undefined
+                if (handoverCalls.length > 0) {
+
+                    // Get the _originally_ defined handover tool from the agent's tool list; i.e. the unwrapped tool
+                    const handoverTool = this._activeAgent.tools?.[
+                        handoverCalls[0].toolName
+                        ]! as AgentHandoverTool<SWARM_CONTEXT, any>
+
+                    // save the previous agent's information for the stream delta
+                    const previousAgent = {name: this._activeAgent.name, id: this._activeAgent.uuid}
+                    // Execute the handover tool with the arguments generated by the LLM, _and_ the current context
+                    const result = await handoverTool.execute({
+                        ...handoverCalls[0].args,
+                        ...this.context
+                    }, {})
+
+                    // Based on the results of executing the user-supplied handover tool with the LLM-generated args and
+                    // context, update the active agent and update the context IFF a context update was specified
+                    this._activeAgent = result.agent
+                    if (result.context) this.context = {
+                        ...this.context,
+                        ...result.context
+                    }
+
+                    // Generate an "artificial" handover tool result to add to the history
+                    handoverToolResult = {
+                        type: 'tool-result',
+                        toolCallId: handoverCalls[0].toolCallId,
+                        toolName: handoverCalls[0].toolName,
+                        result: `Handing over to agent ${this._activeAgent.name}`,
+                        handedOverTo: {
+                            id: this._activeAgent.uuid,
+                            name: this._activeAgent.name
+                        },
+                        args: handoverCalls[0].args,
+                        agent: previousAgent
+                    } satisfies ExtendedTextStreamPart<any>
+                    // push the tool result into the stream
+                    enqueue(handoverToolResult)
+                }
+
+                // locate the assistant message for the tool call, and the tool-role tool response message
+                const toolMessage = responseMessages.at(-1)?.role === 'tool'
+                    ? (responseMessages.at(-1) as CoreToolMessage)
+                    : undefined
+                const assistantMessage = responseMessages.at(
+                    toolMessage === undefined ? -1 : -2
+                ) as CoreAssistantMessage
+
+                // if we created a handover tool result for a handover -- i.e. if there was a handover
+                if (handoverToolResult) {
+
+                    // If there is NO tool result message (because there was no executor) then we add a tool-result
+                    // message that contains the handover tool result
+                    if (toolMessage == null) {
+                        responseMessages.push({role: 'tool', content: [handoverToolResult]})
+                    }
+                        // If there IS a tool result message (e.g. if there was a call and THEN a handover, add the
+                        // handover
+                    //  result to the existing message.
+                    else {
+                        toolMessage.content.push(handoverToolResult)
+                    }
+                }
+
+                // clean out unused tool calls
+                if (typeof assistantMessage.content !== 'string') {
+                    const unusedToolCallIds = handoverCalls
+                        .filter((call, index) => index > 0)
+                        .map(call => call.toolCallId)
+
+                    assistantMessage.content = assistantMessage.content.filter(part => {
+                        return part.type === 'tool-call'
+                            ? !unusedToolCallIds.includes(part.toolCallId)
+                            : true
+                    })
+                }
+
+                // So, if we haven't generated text or errored and we're here, that merans that execution either stopped
+                //  Because of an agent transfer, which we already handled, OR because the agent ran out of max steps
+                const assistantMessages = response.messages.filter(message => message.role === 'assistant')
+                if (
+                    initialAgent.config.maxTurns &&
+                    initialAgent.config.maxTurns === assistantMessages.length &&
+                    responseMessages.filter(message => message.role === 'assistant').length < maxTotalSteps
+                ) {
+                    this._activeAgent = this.queen
+                }
+
+            }
+            while (responseMessages.filter(message => message.role === 'assistant').length < maxTotalSteps)
+            closeStream() // close the open stream
+
+            // update history
+            this.messages.push(...responseMessages)
+
+            // return to queen if requested
+            if (this.returnToQueen) this._activeAgent = this.queen
+
+            // Resolve the promises we set earlier
+            lastResult.finishReason.then(reason => finishReasonPromise.resolve(reason))
+            activeAgentPromise.resolve(this._activeAgent as Readonly<Agent>)
+            lastResult.text.then(text => textPromise.resolve(text))
+            allResponseMessagesPromise.resolve(responseMessages)
+            contextPromise.resolve(this.context)
+
+        })()
+
+        // TODO make sure you resolve these promises.
         return {
             finishReason: finishReasonPromise.promise,
             activeAgent: activeAgentPromise.promise,
-            text: activeAgentPromise.promise,
+            text: textPromise.promise,
             messages: allResponseMessagesPromise.promise,
             context: contextPromise.promise,
             textStream: textStream,
@@ -467,8 +578,9 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
     }
 
     /**
-     * wrap the agent's tools to hide the swarmContext property that they can request to get access to the swarm's context;
-     * so that the LLM doesn't see it and try to generate it. this requires modifying the JSON schema, and wrapping the executor.
+     * wrap the agent's tools to hide the swarmContext property that they can request to get access to the swarm's
+     * context; so that the LLM doesn't see it and try to generate it. this requires modifying the JSON schema, and
+     * wrapping the executor.
      * @param tools
      * @private
      */

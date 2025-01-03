@@ -1,12 +1,21 @@
 import z from 'zod'
-import {type CoreTool, type JSONValue, Output, type TextStreamPart} from 'ai'
+import {
+    type CallWarning,
+    type CoreTool,
+    type FinishReason,
+    type JSONValue, type LanguageModelRequestMetadata, type LanguageModelResponseMetadata,
+    type LanguageModelUsage,
+    type LogProbs,
+    Output, type ProviderMetadata, type Schema,
+    type TextStreamPart
+} from 'ai'
 
 /**
  * Deep-copy an object using JSON.parse and JSON.stringify. This will not work for complex objects, and may be slow
  * as your object size increases
  * @param object
  */
-export function deepCopy<T>(object: any): T{
+export function deepCopy<T>(object: any): T {
     return JSON.parse(JSON.stringify(object))
 }
 
@@ -22,6 +31,7 @@ export const jsonValueSchema: z.ZodType<JSONValue> = z.lazy(() => z.union([
 export type JSONSerializableObject = { [key: string]: JSONValue }
 
 export type AsyncIterableStream<T> = AsyncIterable<T> & ReadableStream<T>
+
 export function createAsyncIterableStream<T>(
     source: ReadableStream<T>
 ): AsyncIterableStream<T> {
@@ -32,15 +42,14 @@ export function createAsyncIterableStream<T>(
         const reader = stream.getReader();
         return {
             async next(): Promise<IteratorResult<T>> {
-                const { done, value } = await reader.read();
-                return done ? { done: true, value: undefined } : { done: false, value };
+                const {done, value} = await reader.read();
+                return done ? {done: true, value: undefined} : {done: false, value};
             },
         };
     };
 
     return stream as AsyncIterableStream<T>;
 }
-
 
 
 /**
@@ -52,6 +61,7 @@ export function createAsyncIterableStream<T>(
 export function createStitchableStream<T>(): {
     stream: ReadableStream<T>;
     addStream: (innerStream: ReadableStream<T>) => void;
+    enqueue: (c: T) => void
     close: () => void;
 } {
     let innerStreamReaders: ReadableStreamDefaultReader<T>[] = [];
@@ -75,7 +85,7 @@ export function createStitchableStream<T>(): {
         }
 
         try {
-            const { value, done } = await innerStreamReaders[0].read();
+            const {value, done} = await innerStreamReaders[0].read();
 
             if (done) {
                 // Case 3: Current inner stream is done
@@ -84,14 +94,17 @@ export function createStitchableStream<T>(): {
                 // Continue pulling from the next stream if available
                 if (innerStreamReaders.length > 0) {
                     await processPull();
-                } else if (isClosed) {
+                }
+                else if (isClosed) {
                     controller?.close();
                 }
-            } else {
+            }
+            else {
                 // Case 4: Current inner stream returns an item
                 controller?.enqueue(value);
             }
-        } catch (error) {
+        }
+        catch (error) {
             // Case 5: Current inner stream throws an error
             controller?.error(error);
             innerStreamReaders.shift(); // Remove the errored stream
@@ -102,20 +115,23 @@ export function createStitchableStream<T>(): {
         }
     };
 
+
+    const stream = new ReadableStream<T>({
+        start(controllerParam) {
+            controller = controllerParam;
+        },
+        pull: processPull,
+        async cancel() {
+            for (const reader of innerStreamReaders) {
+                await reader.cancel();
+            }
+            innerStreamReaders = [];
+            isClosed = true;
+        },
+    })
     return {
-        stream: new ReadableStream<T>({
-            start(controllerParam) {
-                controller = controllerParam;
-            },
-            pull: processPull,
-            async cancel() {
-                for (const reader of innerStreamReaders) {
-                    await reader.cancel();
-                }
-                innerStreamReaders = [];
-                isClosed = true;
-            },
-        }),
+        stream: stream,
+        enqueue: (c: T) => controller?.enqueue(c),
         addStream: (innerStream: ReadableStream<T>) => {
             if (isClosed) {
                 throw new Error('Cannot add inner stream: outer stream is closed');
@@ -164,10 +180,36 @@ export function createResolvablePromise<T = any>(): {
     };
 }
 
+/**
+ * Types copied/pasted from AI SDK so that I can add the 'handover' property
+ */
 export type EnrichedStreamPart<
     TOOLS extends Record<string, CoreTool>,
     PARTIAL_OUTPUT,
 > = {
     part: TextStreamPart<TOOLS>;
+    partialOutput: PARTIAL_OUTPUT | undefined;
+};
+
+type TextStreamPartWithoutToolResult<TOOLS extends Record<string, CoreTool>> = Exclude<TextStreamPart<TOOLS>, {
+    type: 'tool-result'
+}>
+type TextStreamPartToolResult<TOOLS extends Record<string, CoreTool>> = Extract<TextStreamPart<TOOLS>, {
+    type: 'tool-result'
+}>
+type NewToolResultPart<TOOLS extends Record<string, CoreTool>> = TextStreamPartToolResult<TOOLS> &
+    { handedOverTo?: { name: string, id: string } };
+
+
+export type ExtendedTextStreamPart<TOOLS extends Record<string, CoreTool>> = (TextStreamPartWithoutToolResult<TOOLS> |
+    NewToolResultPart<TOOLS>) & {
+    agent: { id: string, name: string }
+}
+
+export type ExtendedEnrichedStreamPart<
+    TOOLS extends Record<string, CoreTool>,
+    PARTIAL_OUTPUT,
+> = {
+    part: ExtendedTextStreamPart<TOOLS>;
     partialOutput: PARTIAL_OUTPUT | undefined;
 };
