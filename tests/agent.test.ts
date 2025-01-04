@@ -1,5 +1,5 @@
 import {describe, test, expect} from 'bun:test'
-import Agent from '../src/agent'
+import {Agent} from '../src/agent'
 
 describe('Agent Initialization tests', () => {
 

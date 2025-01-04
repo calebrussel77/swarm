@@ -108,4 +108,4 @@ export class Agent<SWARM_CONTEXT extends object = JSONSerializableObject> {
 
 }
 
-export default Agent
+export const a = 1
