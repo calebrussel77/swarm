@@ -356,6 +356,8 @@ new Swarm<SWARM_CONTEXT>(options: SwarmOptions<SWARM_CONTEXT>)
 > A `SwarmMessage` is extended from `CoreMessage` in the AI SDK, with the exception that each `CoreAssistantMessage` has 
 > a `sender` property set to the `name` of the `agent` in the swarm that generated it.
 ### Methods
+
+#### `generateText`
 ```typescript
 generateText(options: SwarmInvocationOptions<SWARM_CONTEXT>): Promise<GenerateTextResult>
 ```
