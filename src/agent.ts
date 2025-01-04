@@ -1,8 +1,8 @@
-import {type CoreTool, type CoreToolChoice, type LanguageModel, type LanguageModelV1, tool} from 'ai'
+import {type CoreToolChoice, type LanguageModel} from 'ai'
 import nunjucks from 'nunjucks'
 import z from 'zod'
 import {randomUUID} from 'node:crypto'
-import {type JSONSerializableObject, jsonValueSchema} from './utils'
+import {type JSONSerializableObject} from './utils'
 
 /**
  * Pulled from vercel AI SDK; useful type defs

@@ -1,12 +1,7 @@
 import z from 'zod'
 import {
-    type CallWarning,
     type CoreTool,
-    type FinishReason,
-    type JSONValue, type LanguageModelRequestMetadata, type LanguageModelResponseMetadata,
-    type LanguageModelUsage,
-    type LogProbs,
-    Output, type ProviderMetadata, type Schema,
+    type JSONValue,
     type TextStreamPart
 } from 'ai'
 
@@ -38,6 +33,7 @@ export function createAsyncIterableStream<T>(
 
     const stream: ReadableStream<T> = source.pipeThrough(new TransformStream<T, T>());
 
+    // @ts-expect-error AI SDK implementation works fine
     (stream as AsyncIterableStream<T>)[Symbol.asyncIterator] = () => {
         const reader = stream.getReader();
         return {

@@ -13,10 +13,12 @@
   },
   "scripts": {
     "build": "bun run build.ts",
-    "test": "bun test --timeout 20000 --coverage"
+    "test": "bun test --timeout 20000 --coverage",
+    "prepublishOnly": "bun run build"
   },
   "files": [
-    "dist"
+    "dist",
+    "src"
   ],
   "keywords": [
     "swarm",
@@ -26,7 +28,8 @@
     "agent",
     "agents",
     "orchestration",
-    "multi-agent"
+    "multi-agent",
+    "bun"
   ],
   "license": "MIT",
   "homepage": "https://github.com/k-mistele/swarm#readme",

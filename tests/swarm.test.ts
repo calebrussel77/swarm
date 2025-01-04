@@ -4,7 +4,7 @@ import {openai} from '@ai-sdk/openai'
 import {Agent} from '../src/agent'
 import z from 'zod'
 import {Hive} from '../src/hive'
-import {type TextPart, type TextStreamPart, tool, type ToolCallPart} from 'ai'
+import {type TextPart, type ToolCallPart} from 'ai'
 import type {ExtendedTextStreamPart} from '../src/utils'
 
 
@@ -12,8 +12,18 @@ describe('Swarm Initialization tests', () => {
 
     test('Create a swarm with an agent should succeed', () => {
 
-        let agent: Agent
-        let swarm: Swarm
+        let agent: Agent = new Agent({
+            name: 'Haiku writer',
+            description: 'Always responds in haikus',
+            instructions: 'Write a haiku in response to the user\'s request',
+        })
+        // @ts-expect-error it's reassigned for test purposese
+        let swarm: Swarm = new Swarm({
+            defaultModel: openai('gpt-4o-mini'),
+            name: 'Test Swarm',
+            queen: agent,
+            initialContext: {}
+        })
 
         expect(() => {
             agent = new Agent({
@@ -344,7 +354,7 @@ describe('Multi-agent swarm streaming', async () => {
 
             chunks.push(chunk)
         }
-        
+
 
     })
 

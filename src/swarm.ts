@@ -19,9 +19,12 @@ import type {
 import {tool, generateText, streamText} from 'ai'
 import {Agent, type AgentHandoverTool, type AgentTool} from './agent'
 import {
-    type AsyncIterableStream, createAsyncIterableStream,
+    createAsyncIterableStream,
     createResolvablePromise,
-    createStitchableStream, type EnrichedStreamPart, type ExtendedEnrichedStreamPart, type ExtendedTextStreamPart,
+    createStitchableStream,
+    type EnrichedStreamPart,
+    type ExtendedEnrichedStreamPart,
+    type ExtendedTextStreamPart,
     type JSONSerializableObject
 } from './utils'
 import {openai} from '@ai-sdk/openai'
@@ -358,8 +361,6 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
 
             do {
                 const initialAgent = this._activeAgent
-                const maxStepsForThisAgent = this._activeAgent.config.maxTurns ?? maxTotalSteps
-                const messages = [...initialMessages, ...responseMessages]
 
                 // Run generation
                 lastResult = streamText({
