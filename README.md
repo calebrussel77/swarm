@@ -68,13 +68,27 @@ Each swarm has a `context` object which provides a type of global state across i
 Agents in the swarm can update the context with tool calls and handovers, and the swarm's context is passed in as a
 template to each agent's instructions during rendering with each swarm invocation.
 
+> [!IMPORTANT]
+> When `generateText` or `streamText` are used, the swarm will generate and process tool calls and handovers until a text
+> response is generated.
+
+Multiple subsequent tool calls and handovers in a row can create latency before any text is generated for the user. 
+
+> [!TIP]
+> When `streamText` is used, the name of the tool that is called as well as the agent calling it will be available in 
+> the stream. Use this to provide feedback to users.
+
+Though streaming is more difficult to handle on the client side, it can allow you to
+provide user feedback or take actions as new information becomes available, creating less latency, better UX, and 
+lower time-to-interactivity.
+
 ## Hive 
 A `Hive` can be thought of as a stateless factory for creating swarms (which are stateful-by-default). For applications 
 which use swarms statelessly, hives are unnecessary.
 
 ## Handover 
 A handover is when one agent in the swarm transfers control of execution to another agent. handovers are achieved through
-special tool calls that return another agent. Like traditional tool calls, a handover tool call can still have exeution 
+special tool calls that return another agent. Like traditional tool calls, a handover tool call can still have execution 
 logic; and both regular and handover tool calls can update the swarm's `context` object.
 
 ## Hallucinations
@@ -160,8 +174,8 @@ const swarm = new Swarm({
 ```typescript
 new Agent<SWARM_CONTEXT>(options: AgentOptions<SWARM_CONTEXT>)
 ```
-> **Warning!**
-> _Note_ that `SWARM_CONTEXT` defaults to `any` if a template value is not provided. Be careful! 
+> [!IMPORTANT]
+> Note that `SWARM_CONTEXT` defaults to `any` if a template value is not provided. Be careful! 
 Contexts should be JSON-serializable.
 
 ### Agent Options `AgentOptions<SWARM_CONTEXT>`
@@ -243,7 +257,7 @@ new Agent({
 })
 ```
 
-> **Important**
+> [!TIP]
 > The swarm's context isn't just for system prompts! Tools can request access 
 > to the swarm's context, and both regular and handover tools can update it.
 
@@ -352,17 +366,18 @@ new Swarm<SWARM_CONTEXT>(options: SwarmOptions<SWARM_CONTEXT>)
 | `name` | `string (optional)` | A name for the swarm instance                                                                                               |
 | `maxTurns` | `number (optional)` | Maximum number of turns (tool call & execution iterations) allowed in a single invocation; use to prevent infinite loops    |
 | `returnToQueen` | `boolean (optional)` | Whether to return control to the queen agent after each interaction, or if the currently-active agent should remain active. |
-> **Note**
+
+> [!NOTE]
 > A `SwarmMessage` is extended from `CoreMessage` in the AI SDK, with the exception that each `CoreAssistantMessage` has 
 > a `sender` property set to the `name` of the `agent` in the swarm that generated it.
+
 ### Methods
 
 #### `generateText`
 ```typescript
 generateText(options: SwarmInvocationOptions<SWARM_CONTEXT>): Promise<GenerateTextResult>
 ```
-Generate text with the swarm. Streaming isn't supported yet, but will be soon!
-`SwarmInvocationOptions`: 
+Generate text with the swarm. Options:
 
 | Property | Type | Description                                                                                                                                         |
 |----------|------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -374,6 +389,8 @@ Generate text with the swarm. Streaming isn't supported yet, but will be soon!
 | `content` | `UserContent` | Required if `messages` is not provided. The content for the swarm invocation.                                                                       |
 | `messages` | `Array<SwarmMessage>` | Required if `content` is not provided. An array of swarm messages for the invocation.                                                               |
 
+Returns: `GenerateTextResult` (type from the [AI SDK](https://sdk.vercel.ai/docs/reference/ai-sdk-core/generate-text))
+
 Notes: 
 - The `content` and `messages` properties are mutually exclusive. You must provide either `content` or `messages`, but not both.
 By default, you should probably only need to set one of these.
@@ -381,16 +398,65 @@ By default, you should probably only need to set one of these.
 
 #### `streamText`
 ```typescript 
-streamText(options: SwarmInvocationOptions<SWARM_CONTEXT>): {
+streamText(options: SwarmInvocationOptions<SWARM_CONTEXT> & SwarmStreamingOptions): {
     finishReason:  Promise<LanguageModelV1FinishReason>,
     activeAgent: Promise<Agent>,
-    test: Promise<string>,
-    messages: Promise<SwarmMessage>,
+    text: Promise<string>,
+    messages: Promise<Array<SwarmMessage>>,
     context: Promise<SWARM_CONTEXT>,
     textStream: AsyncIterableStream<string>,
     fullStream:  AsyncIterableStream<ExtendedTextStreamPart<any>>
 }
 ```
+
+Stream text and tool calls from the stream. 
+`SwarmInvocationOptions & SwarmStreamingOptions`:
+
+| Property | Type | Description                                                                                                                                         |
+|----------|------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
+| `contextUpdate` | `Partial<SWARM_CONTEXT>` | Optional. Partial update to the swarm context.                                                                                                      |
+| `setAgent` | `Agent<SWARM_CONTEXT>` | Optional. Sets a specific agent for the swarm invocation, overriding the currently active agent                                                     |
+| `maxTurns` | `number` | Optional. Maximum number of turns allowed for the swarm invocation.                                                                                 |
+| `returnToQueen` | `boolean` | Optional. Determines if control of the swarm should be returned to the queen after completion; overrides the property of the same name on the swarm |
+| `onStepFinish` | `(event: StepResult<any>, context: SWARM_CONTEXT) => Promise<void> \| void` | Optional. Callback function executed after each step finishes.                                                                                      |
+| `content` | `UserContent` | Required if `messages` is not provided. The content for the swarm invocation.                                                                       |
+| `messages` | `Array<SwarmMessage>` | Required if `content` is not provided. An array of swarm messages for the invocation.                                                               |
+| `experimental_toolCallStreaming` | `boolean (optional)` | Whether to enable experimental tool call streaming. Enabled by default unless explicitly disabled by setting to `false` |
+
+Notes:
+- The `content` and `messages` properties are mutually exclusive. You must provide either `content` or `messages`, but not both.
+  By default, you should probably only need to set one of these.
+- It is recommended to keep `experimental_toolCallStreaming` enabled; as it will allow you to read the name of the function 
+that is being called as soon as the call begins; this can be very useful in realtime or latency-critical applications so
+that you can take actions or provide feedback to the end-user about what the agent(s) are doing.
+
+Return value:
+> [!IMPORTANT]
+> Unlike `Swarm.generateText`, this method returns immediately. Promise values resolve once the swarm has finished
+> generating.
+
+| Property | Type | Description                                                                                                                                                                               |
+|----------|------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `finishReason` | `Promise<LanguageModelV1FinishReason>` | A promise that resolves to the final finish reason of the final agent that executes. Type is taken from the AI SDK                                                                        |
+| `activeAgent` | `Promise<Agent>` | A promise that resolves to the agent that is active after streaming finishes. If `returnToQueen` is set, this will always be the queen. Otherwise, it will be whatever the last agent was |
+| `text` | `Promise<string>` | A promise that resolves to the text generated at the end of the swarm's generation. |
+| `messages` | `Promise<SwarmMessage>` | A promise that resolves to the messages generated by the swarm duriung streaming | 
+| `context` | `Promise<SWARM_CONTEXT>` | A promise that resolves to the state of the swarm's context once the swarm has finished streaming |
+| `textStream` | `AsyncIterableStream<string>` | Async iterable stream that yields the text chunks generated by the LLM once text (rather than tool calls) is being generated |
+| `fullStream`| `AsyncIterableStream<ExtendedTextStreamPart<any>>` | Async iterable stream that contains the individual deltas for streaming, including text deltas, tool deltas, the finished tool call and tool results. See `streamText` in the AI SDK for details; note that `experimental_toolCallStreaming` is enabled by default. |
+
+`ExtendedTextStreamPart` is etended from the [AI SDK's `TextStreamPart`](https://sdk.vercel.ai/docs/reference/ai-sdk-core/stream-text#full-stream.text-stream-part),
+with several important additions:
+1. Each delta has an `agent` key set to an object (`agent: { name: string, id: string }`) containing the `id` (`Agent.uuid`) and `name` (`Agent.name`) of the 
+agent that generated the delta. This allows you to easily determine which agent is calling tools or generating text 
+during stream processing; and can be very useful in real-time applications. 
+2. A `TextStreamPart` with `{type: 'tool-result'}` will be included in streams for handovers, and in addition to the 
+`agent` key described above which describes which agent was responsible for the delta, has a `handedOverTo` property 
+indicating which agent the handover tool is transferring control to. The structure (`handedOverTo?: { name: string, id: string }`) 
+is the same as for `agent`.
+
+In both cases, the `Agent`'s `name` and `id` are used rathern than the `Agent` itself to preserve JSON-serializability.
+
 
 #### `getContext`
 ```typescript 
@@ -458,4 +524,37 @@ const result = await swarm.generateText({
 console.log(result.text);
 console.log(result.activeAgent.name);
 console.log(result.context);
+```
+
+## Streaming
+
+```typescript
+const result = swarm.streamText({
+    content: 'I\'d like to talk to someone about salesforce AI agents'
+})
+
+
+let handedOver: boolean = false
+let activeAgentName: string = agent.name
+for await (const chunk of result.fullStream) {
+    if (chunk.type === 'tool-result' && chunk.handedOverTo) {
+        handedOver = true
+        console.log(`Handover executed to agent ${chunk.handedOverTo.name}!`)
+    }
+    if (chunk.type === 'tool-call-streaming-start') {
+        console.log(`Agent ${chunk.agent.name} is calling ${chunk.toolName}; arguments are being generated`)
+    }
+    if (chunk.agent.name !== activeAgentName) {
+        console.log(`Active agent changed:`, chunk.agent.name) 
+        activeAgentName = chunk.agent.name
+    }
+}
+
+let streamedText = ''
+for await (const textChunk of result.textStream) {
+    // chunks of `textStream` are just strings :)
+    streamedText += textChunk
+}
+streamedText === await result.text // true 
+
 ```

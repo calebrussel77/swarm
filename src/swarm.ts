@@ -47,16 +47,6 @@ export type SwarmOptions<SWARM_CONTEXT extends object = JSONSerializableObject> 
 }
 
 /**
- * TODO - Need to implement streaming in this so that we can stream generated text to the end user
- *  ALSO, it would be great if we can have a type of tool where the agent includes a "thought" argument, or a note
- *  for the end user, e.g. "I'm searching for XYZ related to your question, one moment please"
- *
- *  TODO alternatively, we can extend swarm with event emitter, and emit events when tools are invoked and when
- *   control is transferred to another agent - this would be really good for conversational AI Applications, status
- *   updates in UI, etc.
- */
-
-/**
  * Invoke the swarm to handle a user message
  */
 export type BaseSwarmInvocationOptions<SWARM_CONTEXT extends object = JSONSerializableObject> = {
@@ -82,6 +72,9 @@ export type SwarmInvocationOptions<SWARM_CONTEXT extends object> = BaseSwarmInvo
     SwarmInvocationWithMessages
     )
 
+export type SwarmStreamingOptions = {
+    experimental_toolCallStreaming?: boolean
+}
 
 /**
  * The swarm is the callable that can generate text, generate objects, or stream text.
@@ -286,7 +279,8 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
      * Stream from the swarm
      * @param options
      */
-    public streamText(options: SwarmInvocationOptions<SWARM_CONTEXT>) {
+    public streamText(options: SwarmInvocationOptions<SWARM_CONTEXT> & SwarmStreamingOptions) {
+
 
         // swarm updates and overrides
         this.handleUpdatesAndOverrides(options)
@@ -377,7 +371,7 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
                         )
                         : undefined,
                     messages: [...initialMessages, ...responseMessages],
-                    experimental_toolCallStreaming: true
+                    experimental_toolCallStreaming: !(options.experimental_toolCallStreaming === false)
                 });
 
                 // It returns instantly, so add the stream, then await the response to be generated

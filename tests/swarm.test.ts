@@ -354,9 +354,5 @@ describe('Multi-agent swarm streaming', async () => {
 
             chunks.push(chunk)
         }
-
-
     })
-
-
 })
