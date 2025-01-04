@@ -15,7 +15,7 @@ One of the design concerns for this library is optimizing for low latency in rea
 [Pipecat](https://www.pipecat.ai/) applications and other multimodal, multi-component applications. 
 This library is _not_ strongly opinionated for such applications, but many defaults reflect the philosophy that statefulness is a reality and therefore a useful default for LLM applications, and LLM latency is a critical concern for user-facing apps
 
-## Table of Contents
+# Table of Contents
 
 1. [Installation](#installation)
 2. [Key Concepts](#key-concepts)
@@ -24,13 +24,13 @@ This library is _not_ strongly opinionated for such applications, but many defau
 5. [Examples](#examples)
 
 
-## Installation
+# Installation
 
 ```bash
 npm install agentswarm
 ```
 
-## Key Concepts
+# Key Concepts
 - **Agent**: An individual AI entity with specific capabilities and instructions. Each agent has a unique system prompt 
 or prompt template and a set of tools. 
 - **Swarm**: A collection of agents working together to accomplish tasks.
@@ -38,7 +38,7 @@ or prompt template and a set of tools.
 - **Context**: Shared information that can be updated and accessed by agents within a swarm. 
 - **Handover**: Transferring control from one agent to another; achieved by a tool call.
 
-### Agents
+## Agents
 Agents are defined using the `Agent` class. By design, agents are stateless. 
 Each agent has a name, a description, and a set of tools. An agent also have additional configuration 
 properties such as a `LanguageModel` to use that's different from the swarm's default, for example if you need a 
@@ -48,7 +48,7 @@ Each agent's `instructions` should either be a string, a nunjucks template strin
 context object for the swarm and returns a string. This creates a reasonable amount of flexibility for your agent's 
 prompt, but doesn't force you into patterns that you may not need.
 
-### Swarm
+## Swarm
 Unlike an agent, a `Swarm` is stateful by default. This is _divergent from OpenAI's pattern_, but is useful in a variety
 of cases, including in realtime applications (e.g. voice) or situations where low latency is critical. For example, once
 a response is generated and presented to a user (e.g. asking for feedback or more info for a tool call),
@@ -68,16 +68,16 @@ Each swarm has a `context` object which provides a type of global state across i
 Agents in the swarm can update the context with tool calls and handovers, and the swarm's context is passed in as a
 template to each agent's instructions during rendering with each swarm invocation.
 
-### Hive 
+## Hive 
 A `Hive` can be thought of as a stateless factory for creating swarms (which are stateful-by-default). For applications 
 which use swarms statelessly, hives are unnecessary.
 
-### Handover 
+## Handover 
 A handover is when one agent in the swarm transfers control of execution to another agent. handovers are achieved through
 special tool calls that return another agent. Like traditional tool calls, a handover tool call can still have exeution 
 logic; and both regular and handover tool calls can update the swarm's `context` object.
 
-### Hallucinations
+## Hallucinations
 OpenAI's swarm framework is described as an educational tool, rather than a production-ready framework. One of the 
 reasons for this is because the entire conversation history across handovers, including tools and tool results is 
 available to each agent, and LLMs are in-context learners.
@@ -88,9 +88,9 @@ Additionally, swarm's design is prone to tool hallucination because the currentl
 from all the other agents, even for tools which are not available to it.
 
 This framework provides several options and patterns to avoid these issues. 
-## Usage
+# Usage
 
-### Creating an Agent
+## Creating an Agent
 
 ```typescript
 import { Agent } from 'agentswarm';
@@ -107,7 +107,7 @@ const salesAgent = new Agent<SalesContext>({
 });
 ```
 
-### Creating a Hive
+## Creating a Hive
 
 ```typescript
 import { Hive } from 'agentswarm';
@@ -125,13 +125,13 @@ const hive = new Hive<SalesContext>({
 });
 ```
 
-### Spawning a Swarm
+## Spawning a Swarm
 
 ```typescript
 const swarm = hive.spawnSwarm();
 ```
 
-### Using the Swarm
+## Using the Swarm
 
 ```typescript
 const result = await swarm.generateText({
@@ -143,7 +143,7 @@ console.log(result.activeAgent.name);
 console.log(result.context);
 ```
 
-### Creating a swarm directly
+## Creating a swarm directly
 ```typescript
 const swarm = new Swarm({
     defaultModel: openai('gpt-4o-mini'),
@@ -153,9 +153,9 @@ const swarm = new Swarm({
 })
 ```
 
-## API Reference
+# API Reference
 
-### Agent
+## Agent
 
 ```typescript
 new Agent<SWARM_CONTEXT>(options: AgentOptions<SWARM_CONTEXT>)
@@ -164,7 +164,7 @@ new Agent<SWARM_CONTEXT>(options: AgentOptions<SWARM_CONTEXT>)
 > _Note_ that `SWARM_CONTEXT` defaults to `any` if a template value is not provided. Be careful! 
 Contexts should be JSON-serializable.
 
-#### Agent Options `AgentOptions<SWARM_CONTEXT>`
+### Agent Options `AgentOptions<SWARM_CONTEXT>`
 
 | Name | Type | Description |
 |------|------|-------------|
@@ -177,7 +177,7 @@ Contexts should be JSON-serializable.
 | `maxTurns` | `number (optional)` | Max number of iterative calls of tool calls & tool execution; use it to prevent infinite tool call loops. |
 | `temperature` | `number (optional)` | Set the LLM's temperature |
 
-#### Agent tool `AgentTool<SWARM_CONTEXT>`
+### Agent tool `AgentTool<SWARM_CONTEXT>`
 `AgentTool` is a wrapper on the AI SDK's native `tool`/`CoreTool` types that represents a callable tool that 
 performs some execution, that hands off execution to the next agent, that updates the context of the swarm, or some 
 combination thereof. 
@@ -316,13 +316,13 @@ const receptionistAgent: Agent<SalesContext> = new Agent<SalesContext>({
 })
 ```
 
-### Hive
+## Hive
 
 ```typescript
 new Hive<HIVE_CONTEXT>(options: HiveOptions<HIVE_CONTEXT>)
 ```
 
-#### Hive Options `HiveOptions<HIVE_CONTEXT>`
+### Hive Options `HiveOptions<HIVE_CONTEXT>`
 
 | Name | Type | Description |
 |------|------|-------------|
@@ -330,18 +330,18 @@ new Hive<HIVE_CONTEXT>(options: HiveOptions<HIVE_CONTEXT>)
 | `queen` | `Agent<HIVE_CONTEXT>` | The initial agent (often an orchestrator) that serves as the entry point for the swarm |
 | `defaultContext` | `HIVE_CONTEXT (optional)` | The default context object to be used when spawning new swarms |
 
-#### Methods
-
+### Methods
+#### `spawnSwarm`
 - `spawnSwarm(options?: HiveCreateSwarmOptions<HIVE_CONTEXT>): Swarm<HIVE_CONTEXT>` - creates a swarm based off the hive, 
 with the ability to override certain values if desired
 
-### Swarm
+## Swarm
 
 ```typescript
 new Swarm<SWARM_CONTEXT>(options: SwarmOptions<SWARM_CONTEXT>)
 ```
 
-#### Swarm Options `SwarmOptions<SWARM_CONTEXT>`
+### Swarm Options `SwarmOptions<SWARM_CONTEXT>`
 
 | Name | Type | Description                                                                                                                 |
 |------|------|-----------------------------------------------------------------------------------------------------------------------------|
@@ -355,7 +355,7 @@ new Swarm<SWARM_CONTEXT>(options: SwarmOptions<SWARM_CONTEXT>)
 > **Note**
 > A `SwarmMessage` is extended from `CoreMessage` in the AI SDK, with the exception that each `CoreAssistantMessage` has 
 > a `sender` property set to the `name` of the `agent` in the swarm that generated it.
-#### Methods
+### Methods
 ```typescript
 generateText(options: SwarmInvocationOptions<SWARM_CONTEXT>): Promise<GenerateTextResult>
 ```
@@ -377,19 +377,34 @@ Notes:
 By default, you should probably only need to set one of these.
 - Swarms can be used in a stateless manner by always setting the `messages` array rather than `content`, and by always setting `returnToQueen` or using `setAgent`
 
+#### `streamText`
+```typescript 
+streamText(options: SwarmInvocationOptions<SWARM_CONTEXT>): {
+    finishReason:  Promise<LanguageModelV1FinishReason>,
+    activeAgent: Promise<Agent>,
+    test: Promise<string>,
+    messages: Promise<SwarmMessage>,
+    context: Promise<SWARM_CONTEXT>,
+    textStream: AsyncIterableStream<string>,
+    fullStream:  AsyncIterableStream<ExtendedTextStreamPart<any>>
+}
+```
+
+#### `getContext`
 ```typescript 
 getContext(): Readonly<SWARM_CONTEXT>
 ```
 Retrieve the Swarm's context
 
+#### `updateContext`
 ```typescript 
 updateContext(update: Partial<SWARM_CONTEXT>): Readonly<SWARM_CONTEXT>
 ```
 Force-update the swarm's context external to any agent interactions. 
 
-## Examples
+# Examples
 
-### Creating a Simple Sales Swarm
+## Creating a Simple Sales Swarm
 
 ```typescript
 import { Agent, Hive, Swarm } from 'agentswarm';
