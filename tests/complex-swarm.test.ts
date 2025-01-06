@@ -53,7 +53,8 @@ const paymentCollector = new Agent<Context>({
             type: 'function',
             description: 'Call this tool to validate bank account information before executing a charge, to avoid payment fraud.',
             parameters: bankAccountInformationSchema,
-            execute: async ({accountNumber, routingNumber}) => {
+            execute: async (information) => {
+                console.log(`validate bank account information:`, information)
                 const num = Math.random()
                 return {
                     result: num >= 5 ? 'This account is valid' : 'This account is not valid',
@@ -64,7 +65,8 @@ const paymentCollector = new Agent<Context>({
             type: 'function',
             description: 'Call this tool to validate credit card information before executing a charge, to prevent chargebacks',
             parameters: cardInformationSchema,
-            execute: async ({cardNumber, cardExpirationMonth, cardExpirationYear, cardCvvCode}) => {
+            execute: async (cardInfo) => {
+                console.log(`validating card information:`, cardInfo)
                 const num = Math.random()
                 return {
                     result: num >= 0.5 ? 'This card is valid' : 'This card is not valid'
@@ -74,8 +76,9 @@ const paymentCollector = new Agent<Context>({
         charge_credit_card: {
             type: 'function',
             description: 'Call this tool to execute a charge for a credit card.',
-            parameters: cardInformationSchema.and(productSchema),
-            execute: async () => {
+            parameters: cardInformationSchema.merge(z.object({product: productSchema})),
+            execute: async (cardInfo) => {
+                console.log(`charging card:`, cardInfo)
                 return {
                     result: 'Transaction pending. Please submit the 6-digit authentication code that has been sent ' +
                         'to the user in order to authenticate the transaction'
@@ -85,8 +88,9 @@ const paymentCollector = new Agent<Context>({
         charge_bank_account: {
             type: 'function',
             description: 'Call this tool to execut2e a charge for a bank account',
-            parameters: bankAccountInformationSchema.and(productSchema),
-            execute: async () => {
+            parameters: bankAccountInformationSchema.merge(z.object({product: productSchema})),
+            execute: async (bankInfo) => {
+                console.log(`charging bank account:`, bankInfo)
                 return {
                     result: 'Transaction completed!'
                 }
@@ -98,7 +102,8 @@ const paymentCollector = new Agent<Context>({
             parameters: z.object({
                 code: authenticationCodeSchema
             }),
-            execute: async () => {
+            execute: async (info) => {
+                console.log(`submitting auth code:`, info)
                 return {
                     result: 'Transaction completed!'
                 }
@@ -252,22 +257,30 @@ const rl = readline.createInterface({
 
 async function main() {
 
-    while (true) {
-        const userInput: string = await new Promise((resolve) => {
-            rl.question(`${swarm.activeAgent.name} >>> `, resolve)
-        })
-        const result = swarm.streamText({
-            content: userInput,
-            onStepFinish: (event) => {
-               console.log(`\n\nLLM Steps:\n`, event.response.messages)
+    try {
+        while (true) {
+            const userInput: string = await new Promise((resolve) => {
+                rl.question(`${swarm.activeAgent.name} >>> `, resolve)
+            })
+            const result = swarm.streamText({
+                content: userInput,
+                onStepFinish: (event) => {
+                    console.log(`\n\nLLM Steps:\n`, event.response.messages)
+                }
+            });
+            for await (const textChunk of result.textStream) {
+                process.stdout.write(textChunk)
             }
-        });
-        for await (const textChunk of result.textStream) {
-            process.stdout.write(textChunk)
+            await result.text
+            process.stdout.write('\n')
         }
-        await result.text
-        process.stdout.write('\n')
     }
+    catch (err: any) {
+        console.error(err)
+        const messages = swarm.getMessages()
+        messages.forEach((message) => console.log(message))
+    }
+
 }
 
 main().then(() => {console.log(`done`); process.exit(0)})

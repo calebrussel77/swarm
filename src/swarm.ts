@@ -355,7 +355,6 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
 
             do {
                 const initialAgent = this._activeAgent
-
                 // Run generation
                 lastResult = streamText({
                     model: this._activeAgent.config.model || this.defaultModel,
@@ -599,7 +598,7 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
                     options: ToolExecutionOptions
                 ) => Promise<typeof agentTool.execute>) | undefined;
 
-                // Wrap tool to handle context updates if the function requests it
+                // Wrap tool to handle context updates if the function requests it in the return
                 if (agentTool.type === 'function') {
                     functionWrapper = async (
                         args: z.infer<typeof parameters>,
@@ -619,6 +618,7 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
 
                 // If the tool requests the swarm's context, we don't want the LLM to generate it,
                 //  so strip it from the tool call parameters and wrap the executor
+
                 if (SWARM_CONTEXT_PROPERTY_NAME in agentTool.parameters.shape) {
                     // Set the parameters for the tool so they omit the context; so that the LLM doesn't generate it
                     parameters = agentTool.parameters.omit({
@@ -652,32 +652,42 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
 
                     }
                 }
+                else {
+                    executor = functionWrapper
+                }
 
                 // If the tool type is handover, ensure there's no executor so that generation stops and we can
-                // stop the agent
+                // stop the agent; we will run it manually
                 if (agentTool.type === 'handover') {
                     executor = undefined
                 }
 
                 // NOTE this looks more complicated (you'd think you could just pass an undefined executor) but you
                 // cannot, so it has to be done this way.
-                const wrappedTool = executor
-                    ? tool({
-                        type: 'function',
-                        description: agentTool.description,
-                        parameters: parameters,
-                        execute: executor
-                    })
-                    : tool({
-                        type: 'function',
-                        description: agentTool.description,
-                        parameters: parameters,
-                    })
-
+            let wrappedTool: CoreTool
+            if (executor) {
+                wrappedTool = tool({
+                    type: 'function',
+                    description: agentTool.description,
+                    parameters: parameters,
+                    execute: executor
+                })
+            }
+            else {
+                wrappedTool = tool({
+                    type: 'function',
+                    description: agentTool.description,
+                    parameters: parameters,
+                })
+            }
                 return [toolName, wrappedTool]
             })
         )
 
+    }
+
+    public getMessages() {
+        return this.messages as Readonly<Array<SwarmMessage>>
     }
 
 }
