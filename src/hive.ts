@@ -26,7 +26,7 @@ export class Hive<HIVE_CONTEXT extends object = any> {
     readonly defaultInitialContext?: HIVE_CONTEXT
 
     constructor(options: HiveOptions<HIVE_CONTEXT>) {
-        this.defaultModel = options.defaultModel || openai('gpt-40-mini')
+        this.defaultModel = options.defaultModel || openai('gpt-4o-mini')
         this.queen = options.queen
         this.defaultInitialContext = options.defaultContext
     }
