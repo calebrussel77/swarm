@@ -223,7 +223,6 @@ const transferToReceptionist = {
 managerAgent.tools!['transfer_to_receptionist'] = transferToReceptionist
 paymentCollector.tools!['transfer_to_receptionist'] = transferToReceptionist
 
-implementationAgent.tools!['']
 
 const hangupTool = {
     type: 'function',
