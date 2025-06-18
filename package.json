@@ -1,10 +1,10 @@
 {
-  "name": "@calebrussel77/agentswarm",
-  "version": "0.1.1",
+  "name": "@calebrussel77/swarm",
+  "version": "0.1.2",
   "description": "LLM-agnostic typescript framework for creating OpenAI-style Swarm agents with the Vercel AI SDK",
   "private": false,
   "publishConfig": {
-    "access": "restricted"
+    "access": "public"
   },
   "type": "module",
   "main": "./dist/index.cjs",
@@ -36,13 +36,13 @@
     "bun"
   ],
   "license": "MIT",
-  "homepage": "https://github.com/k-mistele/swarm#readme",
+  "homepage": "https://github.com/calebrussel77/swarm#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/k-mistele/swarm.git"
+    "url": "git+https://github.com/calebrussel77/swarm.git"
   },
-  "bugs": "https://github.com/k-mistele/swarm/issues",
-  "author": "Kyle Mistele <kmistele@protonmail.com>",
+  "bugs": "https://github.com/calebrussel77/swarm/issues",
+  "author": "Caleb Russell <calebrussel77@gmail.com>",
   "devDependencies": {
     "@types/bun": "latest",
     "@types/nunjucks": "^3.2.6",

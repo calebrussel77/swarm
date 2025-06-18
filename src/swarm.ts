@@ -698,24 +698,24 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
                   break;
 
                 case "file":
-                  // File: type 8
-                  dataStreamChunk = `8:${JSON.stringify({
+                  // File/Message annotation: type 8 (expects array)
+                  dataStreamChunk = `8:[${JSON.stringify({
                     mimeType: chunkAny.mimeType,
                     data: chunkAny.base64,
-                  })}\n`;
+                  })}]\n`;
                   break;
 
                 case "tool-call-streaming-start":
-                  // Tool call streaming start: type 12
-                  dataStreamChunk = `12:${JSON.stringify({
+                  // Tool call streaming start: type b
+                  dataStreamChunk = `b:${JSON.stringify({
                     toolCallId: chunkAny.toolCallId,
                     toolName: chunkAny.toolName,
                   })}\n`;
                   break;
 
                 case "tool-call-delta":
-                  // Tool call delta: type 13
-                  dataStreamChunk = `13:${JSON.stringify({
+                  // Tool call delta: type c
+                  dataStreamChunk = `c:${JSON.stringify({
                     toolCallId: chunkAny.toolCallId,
                     argsTextDelta: chunkAny.argsTextDelta,
                   })}\n`;
@@ -731,8 +731,8 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
                   break;
 
                 case "tool-result":
-                  // Tool result: type 11
-                  dataStreamChunk = `11:${JSON.stringify({
+                  // Tool result: type a
+                  dataStreamChunk = `a:${JSON.stringify({
                     toolCallId: chunkAny.toolCallId,
                     toolName: chunkAny.toolName,
                     result: chunkAny.result,
@@ -743,15 +743,15 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
                   break;
 
                 case "step-start":
-                  // Step start event
-                  dataStreamChunk = `start_step:${JSON.stringify({
+                  // Step start event: type f
+                  dataStreamChunk = `f:${JSON.stringify({
                     messageId: chunkAny.messageId,
                   })}\n`;
                   break;
 
                 case "step-finish":
-                  // Step finish event
-                  dataStreamChunk = `finish_step:${JSON.stringify({
+                  // Step finish event: type e
+                  dataStreamChunk = `e:${JSON.stringify({
                     finishReason: chunkAny.finishReason,
                     usage:
                       options?.sendUsage !== false
@@ -765,7 +765,7 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
                   break;
 
                 case "finish":
-                  // Send finish event if not disabled
+                  // Send finish event if not disabled: type d
                   if (options?.experimental_sendFinish !== false) {
                     const finishEvent = `d:${JSON.stringify({
                       finishReason: chunkAny.finishReason,
@@ -779,11 +779,16 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
                   break;
 
                 case "error":
-                  // Error: type e
+                  // Error: type 3
                   const errorMessage = options?.getErrorMessage
                     ? options.getErrorMessage(chunkAny.error)
                     : "An error occurred";
-                  dataStreamChunk = `e:"${errorMessage}"\n`;
+                  dataStreamChunk = `3:"${errorMessage
+                    .replace(/\\/g, "\\\\")
+                    .replace(/"/g, '\\"')
+                    .replace(/\n/g, "\\n")
+                    .replace(/\r/g, "\\r")
+                    .replace(/\t/g, "\\t")}"\n`;
                   break;
 
                 default:
@@ -802,7 +807,14 @@ export class Swarm<SWARM_CONTEXT extends object = any> {
               ? options.getErrorMessage(error)
               : "An error occurred";
             controller.enqueue(
-              new TextEncoder().encode(`e:"${errorMessage}"\n`)
+              new TextEncoder().encode(
+                `3:"${errorMessage
+                  .replace(/\\/g, "\\\\")
+                  .replace(/"/g, '\\"')
+                  .replace(/\n/g, "\\n")
+                  .replace(/\r/g, "\\r")
+                  .replace(/\t/g, "\\t")}"\n`
+              )
             );
             controller.close();
           }

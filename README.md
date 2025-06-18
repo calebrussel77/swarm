@@ -22,13 +22,16 @@ This library is _not_ strongly opinionated for such applications, but many defau
 3. [Usage](#usage)
 4. [API Reference](#api-reference)
 5. [Examples](#examples)
+6. [Changelog](#changelog)
 
 
 # Installation
 
 ```bash
-npm install agentswarm
+npm install @calebrussel77/swarm
 ```
+
+**Note**: This package requires `ai` version 4.3.16 or higher for proper `useChat` compatibility.
 
 # Key Concepts
 - **Agent**: An individual AI entity with specific capabilities and instructions. Each agent has a unique system prompt 
@@ -526,6 +529,178 @@ console.log(result.activeAgent.name);
 console.log(result.context);
 ```
 
+## Using with Next.js and useChat
+
+### API Route (`app/api/chat/route.ts`)
+
+```typescript
+import { openai } from '@ai-sdk/openai';
+import { convertToCoreMessages } from 'ai';
+import { Agent, Swarm } from 'agentswarm';
+import z from 'zod';
+
+interface ChatContext {
+  topic: string | null;
+  userInfo: string | null;
+}
+
+// Define your agents
+const supportAgent = new Agent<ChatContext>({
+  name: 'Support Agent',
+  description: 'Handles customer support queries',
+  instructions: 'You are a helpful customer support agent. {{topic ? `You are discussing: ${topic}` : ""}}',
+});
+
+const salesAgent = new Agent<ChatContext>({
+  name: 'Sales Agent', 
+  description: 'Handles sales and product inquiries',
+  instructions: 'You are a sales representative. Help customers understand our products and pricing.',
+});
+
+const routerAgent = new Agent<ChatContext>({
+  name: 'Router',
+  description: 'Routes conversations to appropriate agents',
+  instructions: 'You help route customers to the right department.',
+  tools: {
+    transfer_to_support: {
+      type: 'handover',
+      description: 'Transfer to customer support for technical issues',
+      parameters: z.object({
+        issue: z.string().describe('Description of the support issue'),
+      }),
+      execute: async ({ issue }) => ({
+        agent: supportAgent,
+        context: { topic: issue },
+      }),
+    },
+    transfer_to_sales: {
+      type: 'handover',
+      description: 'Transfer to sales for product and pricing questions',
+      parameters: z.object({
+        interest: z.string().describe('What the customer is interested in'),
+      }),
+      execute: async ({ interest }) => ({
+        agent: salesAgent,
+        context: { topic: interest },
+      }),
+    },
+  },
+});
+
+// Create the swarm
+const swarm = new Swarm<ChatContext>({
+  defaultModel: openai('gpt-4o-mini'),
+  queen: routerAgent,
+  initialContext: { topic: null, userInfo: null },
+});
+
+export async function POST(req: Request) {
+  const { messages } = await req.json();
+
+  // Convert useChat messages to Core messages
+  const coreMessages = convertToCoreMessages(messages);
+
+  const result = swarm.streamText({
+    messages: coreMessages,
+  });
+
+  return result.toDataStreamResponse();
+}
+```
+
+### Client Component (`app/page.tsx`)
+
+```typescript
+'use client';
+
+import { useChat } from '@ai-sdk/react';
+
+export default function Chat() {
+  const { messages, input, handleInputChange, handleSubmit, isLoading } = useChat({
+    api: '/api/chat',
+  });
+
+  return (
+    <div className="flex flex-col w-full max-w-md py-24 mx-auto stretch">
+      {messages.map((message) => (
+        <div key={message.id} className="whitespace-pre-wrap">
+          <strong>{message.role === 'user' ? 'User: ' : 'AI: '}</strong>
+          {message.content}
+        </div>
+      ))}
+
+      <form onSubmit={handleSubmit}>
+        <input
+          className="fixed bottom-0 w-full max-w-md p-2 mb-8 border border-gray-300 rounded shadow-xl"
+          value={input}
+          placeholder="Say something..."
+          onChange={handleInputChange}
+          disabled={isLoading}
+        />
+      </form>
+    </div>
+  );
+}
+```
+
+### Alternative: Using with Custom Data Stream
+
+If you need custom data alongside the messages:
+
+```typescript
+// API Route with custom data
+export async function POST(req: Request) {
+  const { messages } = await req.json();
+
+  const result = swarm.streamText({
+    messages: convertToCoreMessages(messages),
+  });
+
+  return result.toDataStreamResponse({
+    sendUsage: true, // Include token usage
+    experimental_sendFinish: true, // Include finish events
+  });
+}
+```
+
+```typescript
+// Client with data access
+'use client';
+
+import { useChat } from '@ai-sdk/react';
+
+export default function ChatWithData() {
+  const { messages, input, handleInputChange, handleSubmit, data } = useChat();
+
+  return (
+    <div className="flex flex-col w-full max-w-md py-24 mx-auto stretch">
+      {/* Display any custom data */}
+      {data && (
+        <pre className="text-xs bg-gray-100 p-2 rounded">
+          {JSON.stringify(data, null, 2)}
+        </pre>
+      )}
+
+      {messages.map((message) => (
+        <div key={message.id} className="whitespace-pre-wrap">
+          <strong>{message.role === 'user' ? 'User: ' : 'AI: '}</strong>
+          {message.content}
+        </div>
+      ))}
+
+      <form onSubmit={handleSubmit}>
+        <input
+          className="fixed bottom-0 w-full max-w-md p-2 mb-8 border border-gray-300 rounded shadow-xl"
+          value={input}
+          placeholder="Say something..."
+          onChange={handleInputChange}
+        />
+      </form>
+    </div>
+  );
+}
+```
+
 ## Streaming
 
 ```typescript
@@ -558,3 +733,36 @@ for await (const textChunk of result.textStream) {
 streamedText === await result.text // true 
 
 ```
+
+# Changelog
+
+## [0.1.2] - 2024-01-xx
+
+### Fixed
+
+- **Data Stream Protocol Compatibility**: Fixed `"data" parts expect an array value.` error when using with Vercel AI SDK's `useChat` hook
+  - Corrected stream part type codes to match AI SDK v4+ protocol:
+    - Tool call streaming start: `12:` → `b:`
+    - Tool call delta: `13:` → `c:`
+    - Tool result: `11:` → `a:`
+    - Error events: `e:` → `3:`
+    - Step events: Updated to proper format codes
+  - Fixed file/annotation parts to use proper array format: `8:[...]\n`
+  - Enhanced error message escaping for proper JSON string format
+  - Updated tests to reflect correct stream protocol format
+
+### Improved
+
+- Added comprehensive Next.js examples with `useChat` integration
+- Enhanced README with proper installation instructions and compatibility notes
+- Added complete API route and client component examples
+
+## [0.1.1] - 2024-01-xx
+
+### Initial Release
+
+- Core swarm functionality with multi-agent orchestration
+- Support for agent handovers and context sharing
+- Tool calling and execution framework
+- Streaming and non-streaming text generation
+- TypeScript support with full type safety

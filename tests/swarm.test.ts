@@ -531,10 +531,10 @@ describe("Swarm Data Stream Tests", () => {
     }
 
     // Should contain tool call events
-    expect(allData).toContain("12:"); // tool-call-streaming-start
-    expect(allData).toContain("13:"); // tool-call-delta
+    expect(allData).toContain("b:"); // tool-call-streaming-start
+    expect(allData).toContain("c:"); // tool-call-delta
     expect(allData).toContain("9:"); // tool-call
-    expect(allData).toContain("11:"); // tool-result
+    expect(allData).toContain("a:"); // tool-result
     expect(allData).toContain("get_weather");
   });
 
@@ -565,7 +565,7 @@ describe("Swarm Data Stream Tests", () => {
     }
 
     // Should contain handover tool result with handedOverTo
-    expect(allData).toContain("11:"); // tool-result
+    expect(allData).toContain("a:"); // tool-result
     expect(allData).toContain('"handedOverTo"');
     expect(allData).toContain("Tool Agent");
   });
@@ -651,7 +651,7 @@ describe("Swarm Data Stream Tests", () => {
     }
 
     // Either the stream should contain an error event, or an error should be thrown
-    const hasErrorEvent = allData.includes('e:"') || allData.includes("error");
+    const hasErrorEvent = allData.includes('3:"') || allData.includes("error");
     expect(errorOccurred || hasErrorEvent).toBe(true);
   });
 
