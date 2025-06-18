@@ -1,7 +1,11 @@
 {
-  "name": "agentswarm",
+  "name": "@calebrussel77/agentswarm",
   "version": "0.1.1",
   "description": "LLM-agnostic typescript framework for creating OpenAI-style Swarm agents with the Vercel AI SDK",
+  "private": false,
+  "publishConfig": {
+    "access": "restricted"
+  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -12,9 +16,9 @@
     "require": "./dist/index.cjs"
   },
   "scripts": {
-    "build": "bun run build.ts",
+    "build": "bun run build.ts && bunx tsc --emitDeclarationOnly --outDir dist",
     "test": "bun test --timeout 20000 --coverage",
-    "prepublishOnly": "bun run build && tsc"
+    "prepublishOnly": "bun run build"
   },
   "files": [
     "dist",
@@ -46,7 +50,7 @@
     "typescript": "^5.0.0"
   },
   "peerDependencies": {
-    "typescript": "^5.8.3"
+    "typescript": "^5.0.0"
   },
   "dependencies": {
     "@ai-sdk/google": "^1.2.19",
